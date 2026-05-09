@@ -1,16 +1,22 @@
 #include "intercode.h"
+#include "Node.h"
 #include <stdlib.h>
 #include <string.h>
 
 static int temp_cnt = 0;
 static int label_cnt = 0;
 
+// helpers
 static char* ic_strdup(const char* s) {
     if (!s) return NULL;
     size_t n = strlen(s) + 1;
     char* p = (char*)malloc(n);
     if (p) memcpy(p, s, n);
     return p;
+}
+
+static int is_node(Node* n, const char* t) {
+    return n && t && strcmp(n->type, t) == 0;
 }
 
 /* Operand 构造 */
@@ -82,7 +88,7 @@ CodeList* join_codelist(CodeList* a, CodeList* b) {
     return a;
 }
 
-/* 输出工具（后续会补全格式） */
+// intercode output logic
 void print_operand(FILE* out, Operand op) {
     switch (op.kind) {
         case OP_VARIABLE:  fprintf(out, "%s", op.u.name); break;
@@ -231,4 +237,89 @@ void print_codelist(FILE* out, CodeList* list) {
         if (list->code) print_intercode(out, list->code);
         list = list->next;
     }
+}
+
+// four important components
+static CodeList* translate_Exp(Node* node) {
+
+}
+
+static CodeList* translate_Stmt(Node* node) {
+
+}
+
+static CodeList* translate_Cond(Node* node) {
+
+}
+static CodeList* translate_Args(Node* node) {
+
+}
+static CodeList* translate_DefList(Node* node) {
+// 赋值情况涉及ASSIGN，数组情况涉及DEC
+}
+
+static CodeList* translate_StmtList(Node* node) {
+    if (!node || !is_node(node, "StmtList"))
+        return NULL;
+
+    Node* stmt = node->child;  // Stmt
+    Node* stmtlist = stmt->next;  // StmtList
+    CodeList* code1 = translate_Stmt(stmt);
+    CodeList* code2 = translate_StmtList(stmtlist);
+    return join_codelist(code1, code2);  // List系列，直接拼接
+}
+
+static CodeList* translate_CompSt(Node* node) {  // 语句块
+    if (!node || !is_node(node, "CompSt"))
+        return NULL;
+
+    Node* deflist = node->child;  // DefList
+    Node* stmtlist = deflist->next;  // StmtList
+    CodeList* code1 = translate_DefList(deflist);  // 赋值情况涉及ASSIGN，数组情况涉及DEC
+    CodeList* code2 = translate_StmtList(stmtlist);
+    return join_codelist(code1, code2);
+}  
+
+static CodeList* translate_FunDec(Node* node) {  // 函数头
+
+}
+static CodeList* translate_ExtDef(Node* node) {
+    // 在这里忽略全局变量和结构体的定义
+    if (!node || !is_node(node, "ExtDef"))
+        return NULL;
+
+    Node* specifier = node->child;
+    Node* fundec = specifier->next;
+    Node* compst = fundec->next;
+
+    if (is_node(fundec, "FunDec") && is_node(compst, "CompSt")) {  // 处理函数定义
+        CodeList* code1 = translate_FunDec(fundec);
+        CodeList* code2 = translate_CompSt(compst);
+        return join_codelist(code1, code2);
+    }
+    return NULL;  // 其他情况暂不处理
+}
+
+static CodeList* translate_ExtDefList(Node* node) {
+    if (!node)
+        return NULL;
+
+    Node* extdef = node->child;
+    Node* extdeflist = extdef->next;
+    CodeList* code1 = translate_ExtDef(extdef);
+    CodeList* code2 = translate_ExtDefList(extdeflist);
+    return join_codelist(code1, code2);  // 高层只负责拼接
+}
+
+static CodeList* translate_Program(Node* node) {
+    if (!node || !is_node(node, "Program"))
+        return NULL;
+    return translate_ExtDefList(node->child);
+}
+
+// 中间代码生成入口
+void generate_intercode(Node* root, FILE* out_file) {
+    if (!root || !out_file) return;
+    CodeList* codes = translate_Program(root);
+    print_codelist(out_file, codes);
 }
