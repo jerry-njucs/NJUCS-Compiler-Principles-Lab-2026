@@ -6,8 +6,14 @@
 static int temp_cnt = 0;
 static int label_cnt = 0;
 
+typedef struct ArgList_ {
+    Operand op;
+    struct ArgList_* next;
+} ArgList;
+
 // 前向声明
 static CodeList* translate_CompSt(Node* node);
+static CodeList* translate_Args(Node* node, ArgList** arg_list);
 
 // helpers
 static char* ic_strdup(const char* s) {
@@ -33,6 +39,14 @@ static const char* relop_to_str(Node* relop_node) {
         case RELOP_NE: return "!=";
         default:       return "!=";
     }
+}
+
+static ArgList* arglist_push_front(ArgList* head, Operand op) {
+    ArgList* n = (ArgList*)malloc(sizeof(ArgList));
+    if (!n) return head;
+    n->op = op;
+    n->next = head;
+    return n;
 }
 
 /* Operand 构造 */
@@ -256,8 +270,78 @@ void print_codelist(FILE* out, CodeList* list) {
 }
 
 // four important components
-static CodeList* translate_Exp(Node* node, Operand* op) {
+static CodeList* translate_Exp(Node* node, Operand* place) {
+    if (!node || !is_node(node, "Exp"))
+        return NULL;
 
+    Node* first = node->child;
+    Node* second = first ? first->next : NULL;
+    Node* third = second ? second->next : NULL;
+    Node* fourth = third ? third->next : NULL;
+
+    if (first && is_node(first, "ID") && second && is_node(second, "LP") && 
+        third && is_node(third, "RP")) {  // ID LP RP
+        const char* funcname = first->idname;
+        Operand tmp;
+        Operand* dest = place;
+        if (!dest) { tmp = new_temp(); dest = &tmp; }
+
+        if (strcmp(funcname, "read") == 0) {
+            InterCode* rd = new_intercode(READ);
+            rd->u.one.op = *dest;
+            return new_codelist(rd);
+        } 
+        else {
+            InterCode* call = new_intercode(CALL);
+            call->u.call.ret = *dest;
+            call->u.call.func = new_function(funcname);
+            return new_codelist(call);
+        }
+    }
+
+    if (first && is_node(first, "ID") && second && is_node(second, "LP") &&
+        third && is_node(third, "Args") && fourth && is_node(fourth, "RP")) {
+        const char* funcname = first->idname;
+        ArgList* arg_list = NULL;
+        CodeList* code1 = translate_Args(third, &arg_list);
+
+        Operand tmp;
+        Operand* dest = place;
+        if (!dest) { tmp = new_temp(); dest = &tmp; }
+
+        if (strcmp(funcname, "write") == 0) {
+            if (arg_list) {
+                InterCode* wr = new_intercode(WRITE);
+                wr->u.one.op = arg_list->op;
+
+                /* place := #0 */
+                InterCode* asn = new_intercode(ASSIGN);
+                asn->u.assign.left = *dest;
+                asn->u.assign.right = new_constant(0);
+
+                CodeList* code2 = new_codelist(wr);
+                CodeList* code3 = new_codelist(asn);
+                return join_codelist(code1, join_codelist(code2, code3));
+            }
+            return code1;
+        }
+
+        // normal function
+        CodeList* code2 = NULL;
+        for (ArgList* p = arg_list; p; p = p->next) {
+            InterCode* arg = new_intercode(ARG);
+            arg->u.one.op = p->op;
+            code2 = join_codelist(code2, new_codelist(arg));
+        }
+
+        InterCode* call = new_intercode(CALL);
+        call->u.call.ret = *dest;
+        call->u.call.func = new_function(funcname);
+
+        CodeList* code3 = new_codelist(call);
+        return join_codelist(code1, join_codelist(code2, code3));
+    }
+    return NULL;
 }
 
 static CodeList* translate_Cond(Node* node, Operand label_true, Operand label_false) {
@@ -437,9 +521,25 @@ static CodeList* translate_Stmt(Node* node) {
     return NULL;
 }
 
-static CodeList* translate_Args(Node* node) {
+static CodeList* translate_Args(Node* node, ArgList** arg_list) {
+    if (!node || !is_node(node, "Args"))
+        return NULL;
 
+    Node* exp = node->child;
+    Node* comma = exp->next;
+    Node* args = comma ? comma->next : NULL;
+
+    Operand t1 = new_temp();
+    CodeList* code1 = translate_Exp(exp, &t1);
+    *arg_list = arglist_push_front(*arg_list, t1);
+
+    if (comma && is_node(comma, "COMMA")) {  // 参数不止一个
+        CodeList* code2 = translate_Args(args, arg_list);
+        return join_codelist(code1, code2);
+    }
+    return code1;
 }
+
 static CodeList* translate_DefList(Node* node) {
 // 赋值情况涉及ASSIGN，数组情况涉及DEC
 }
@@ -459,7 +559,7 @@ static CodeList* translate_CompSt(Node* node) {  // 语句块
     if (!node || !is_node(node, "CompSt"))
         return NULL;
 
-    Node* deflist = node->child;  // DefList
+    Node* deflist = node->child->next;  // DefList
     Node* stmtlist = deflist->next;  // StmtList
     CodeList* code1 = translate_DefList(deflist);  // 赋值情况涉及ASSIGN，数组情况涉及DEC
     CodeList* code2 = translate_StmtList(stmtlist);
