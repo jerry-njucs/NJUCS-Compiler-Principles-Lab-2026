@@ -22,6 +22,19 @@ static int is_node(Node* n, const char* t) {
     return n && t && strcmp(n->type, t) == 0;
 }
 
+static const char* relop_to_str(Node* relop_node) {
+    if (!relop_node) return "!=";
+    switch (relop_node->reloptype) {
+        case RELOP_GT: return ">";
+        case RELOP_LT: return "<";
+        case RELOP_GE: return ">=";
+        case RELOP_LE: return "<=";
+        case RELOP_EQ: return "==";
+        case RELOP_NE: return "!=";
+        default:       return "!=";
+    }
+}
+
 /* Operand 构造 */
 Operand new_temp(void) {
     Operand op;
@@ -248,7 +261,79 @@ static CodeList* translate_Exp(Node* node, Operand* op) {
 }
 
 static CodeList* translate_Cond(Node* node, Operand label_true, Operand label_false) {
+    if (!node || !is_node(node, "Exp"))
+        return NULL;
 
+    Node* first = node->child;
+    Node* second = first ? first->next : NULL;
+    Node* third = second ? second->next : NULL;
+
+    if (first && is_node(first, "Exp") && second && is_node(second, "RELOP") && third && is_node(third, "Exp")) {  // Exp RELOP Exp
+        Operand t1 = new_temp();
+        Operand t2 = new_temp();
+        CodeList* code1 = translate_Exp(first, &t1);
+        CodeList* code2 = translate_Exp(third, &t2);
+        const char* relop = relop_to_str(second);
+
+        InterCode* if_code = new_intercode(IF_GOTO);
+        if_code->u.if_goto.x = t1;
+        if_code->u.if_goto.y = t2;
+        snprintf(if_code->u.if_goto.relop, sizeof(if_code->u.if_goto.relop), "%s", relop);
+        if_code->u.if_goto.z = label_true;
+
+        InterCode* goto_false = new_intercode(GOTO);
+        goto_false->u.one.op = label_false;
+
+        CodeList* whole_code = join_codelist(code1, code2);
+        whole_code = join_codelist(whole_code, new_codelist(if_code));
+        whole_code = join_codelist(whole_code, new_codelist(goto_false));
+        return whole_code;
+    }
+
+    if (is_node(first, "NOT")) {  // NOT Exp
+        return translate_Cond(second, label_false, label_true);
+    }
+    if (second && is_node(second, "AND")) {  // Exp AND Exp
+        Operand label1 = new_label();
+        CodeList* code1 = translate_Cond(first, label1, label_false);
+        CodeList* code2 = translate_Cond(third, label_true, label_false);
+
+        InterCode* mid_code = new_intercode(LABEL);
+        mid_code->u.one.op = label1;
+
+        CodeList* whole_code = join_codelist(code1, new_codelist(mid_code));
+        whole_code = join_codelist(whole_code, code2);
+        return whole_code;
+    }
+
+    if (second && is_node(second, "OR")) {  // Exp OR Exp
+        Operand label1 = new_label();
+        CodeList* code1 = translate_Cond(first, label_true, label1);
+        CodeList* code2 = translate_Cond(third, label_true, label_false);
+
+        InterCode* mid_code = new_intercode(LABEL);
+        mid_code->u.one.op = label1;
+
+        CodeList* whole_code = join_codelist(code1, new_codelist(mid_code));
+        whole_code = join_codelist(whole_code, code2);
+        return whole_code;
+    }
+
+    // other cases
+    Operand t1 = new_temp();
+    CodeList* code1 = translate_Exp(node, &t1);
+    InterCode* if_code = new_intercode(IF_GOTO);
+    if_code->u.if_goto.x = t1;
+    if_code->u.if_goto.y = new_constant(0);
+    snprintf(if_code->u.if_goto.relop, sizeof(if_code->u.if_goto.relop), "!=");
+    if_code->u.if_goto.z = label_true;
+
+    InterCode* goto_false = new_intercode(GOTO);
+    goto_false->u.one.op = label_false;
+
+    CodeList* whole_code = join_codelist(code1, new_codelist(if_code));
+    whole_code = join_codelist(whole_code, new_codelist(goto_false));
+    return whole_code;
 }
 
 static CodeList* translate_Stmt(Node* node) {
