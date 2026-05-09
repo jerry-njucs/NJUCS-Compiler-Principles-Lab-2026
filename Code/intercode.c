@@ -101,10 +101,129 @@ void print_operand(FILE* out, Operand op) {
     }
 }
 
-void print_intercode(FILE* out, InterCode* code) {
-    /* 占位：后续按实验格式补全 */
-    (void)out;
-    (void)code;
+void print_intercode(FILE* out, InterCode* code) {  // intercode printer
+    if (!code) return;
+
+    switch (code->kind) {
+        case LABEL:
+            fprintf(out, "LABEL ");
+            print_operand(out, code->u.one.op);
+            fprintf(out, " :\n");
+            break;
+
+        case FUNCTION:
+            fprintf(out, "FUNCTION ");
+            print_operand(out, code->u.one.op);
+            fprintf(out, " :\n");
+            break;
+
+        case ASSIGN:
+            print_operand(out, code->u.assign.left);
+            fprintf(out, " := ");
+            print_operand(out, code->u.assign.right);
+            fprintf(out, "\n");
+            break;
+
+        case PLUS:
+        case MINUS:
+        case STAR:
+        case DIV: {
+            print_operand(out, code->u.binop.result);
+            fprintf(out, " := ");
+            print_operand(out, code->u.binop.op1);
+            fprintf(out, " %c ",
+                    code->kind == PLUS ? '+' :
+                    code->kind == MINUS ? '-' :
+                    code->kind == STAR ? '*' : '/');
+            print_operand(out, code->u.binop.op2);
+            fprintf(out, "\n");
+            break;
+        }
+
+        case GET_ADDR:
+            print_operand(out, code->u.assign.left);
+            fprintf(out, " := &");
+            print_operand(out, code->u.assign.right);
+            fprintf(out, "\n");
+            break;
+
+        case READ_MEM:
+            print_operand(out, code->u.assign.left);
+            fprintf(out, " := *");
+            print_operand(out, code->u.assign.right);
+            fprintf(out, "\n");
+            break;
+
+        case WRITE_MEM:
+            fprintf(out, "*");
+            print_operand(out, code->u.assign.left);
+            fprintf(out, " := ");
+            print_operand(out, code->u.assign.right);
+            fprintf(out, "\n");
+            break;
+
+        case GOTO:
+            fprintf(out, "GOTO ");
+            print_operand(out, code->u.one.op);
+            fprintf(out, "\n");
+            break;
+
+        case IF_GOTO:
+            fprintf(out, "IF ");
+            print_operand(out, code->u.if_goto.x);
+            fprintf(out, " %s ", code->u.if_goto.relop);
+            print_operand(out, code->u.if_goto.y);
+            fprintf(out, " GOTO ");
+            print_operand(out, code->u.if_goto.z);
+            fprintf(out, "\n");
+            break;
+
+        case RETURN:
+            fprintf(out, "RETURN ");
+            print_operand(out, code->u.one.op);
+            fprintf(out, "\n");
+            break;
+
+        case DEC:
+            fprintf(out, "DEC ");
+            print_operand(out, code->u.dec.x);
+            fprintf(out, " %d\n", code->u.dec.size);
+            break;
+
+        case ARG:
+            fprintf(out, "ARG ");
+            print_operand(out, code->u.one.op);
+            fprintf(out, "\n");
+            break;
+
+        case CALL:
+            print_operand(out, code->u.call.ret);
+            fprintf(out, " := CALL ");
+            print_operand(out, code->u.call.func);
+            fprintf(out, "\n");
+            break;
+
+        case PARAM:
+            fprintf(out, "PARAM ");
+            print_operand(out, code->u.one.op);
+            fprintf(out, "\n");
+            break;
+
+        case READ:
+            fprintf(out, "READ ");
+            print_operand(out, code->u.one.op);
+            fprintf(out, "\n");
+            break;
+
+        case WRITE:
+            fprintf(out, "WRITE ");
+            print_operand(out, code->u.one.op);
+            fprintf(out, "\n");
+            break;
+
+        default:
+            break;
+    }
 }
 
 void print_codelist(FILE* out, CodeList* list) {

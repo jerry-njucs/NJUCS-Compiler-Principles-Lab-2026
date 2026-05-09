@@ -20,7 +20,7 @@ typedef struct Operand_ {
     OperandKind kind;
     union {
         int val;        /* 常量值 */
-        int var_id;     /* 变量/临时变量编号 */
+        int var_id;     /* 临时变量编号 */
         int label_id;   /* 标号编号 */
         char* name;     /* 变量名/函数名 */
     } u;
@@ -28,25 +28,25 @@ typedef struct Operand_ {
 
 /* 中间代码类型（严格对应表 4.6） */
 typedef enum {
-    LABEL_i,       /* LABEL x : */
-    FUNCTION_i,    /* FUNCTION f : */
-    ASSIGN_i,      /* x := y */
-    PLUS_i,        /* x := y + z */
-    MINUS_i,       /* x := y - z */
-    STAR_i,        /* x := y * z */
-    DIV_i,         /* x := y / z */
-    GET_ADDR_i,    /* x := &y */
-    READ_MEM_i,    /* x := *y */
-    WRITE_MEM_i,   /* *x := y */
-    GOTO_i,        /* GOTO x */
-    IF_GOTO_i,     /* IF x relop y GOTO z */
-    RETURN_i,      /* RETURN x */
-    DEC_i,         /* DEC x [size] */
-    ARG_i,         /* ARG x */
-    CALL_i,        /* x := CALL f */
-    PARAM_i,       /* PARAM x */
-    READ_i,        /* READ x */
-    WRITE_i        /* WRITE x */
+    LABEL,       /* LABEL x : */
+    FUNCTION,    /* FUNCTION f : */
+    ASSIGN,      /* x := y */
+    PLUS,        /* x := y + z */
+    MINUS,       /* x := y - z */
+    STAR,        /* x := y * z */
+    DIV,         /* x := y / z */
+    GET_ADDR,    /* x := &y */
+    READ_MEM,    /* x := *y */
+    WRITE_MEM,   /* *x := y */
+    GOTO,        /* GOTO x */
+    IF_GOTO,     /* IF x relop y GOTO z */
+    RETURN,      /* RETURN x */
+    DEC,         /* DEC x [size] */
+    ARG,         /* ARG x */
+    CALL,        /* x := CALL f */
+    PARAM,       /* PARAM x */
+    READ,        /* READ x */
+    WRITE        /* WRITE x */
 } InterCodeKind;
 
 typedef struct InterCode_ {
