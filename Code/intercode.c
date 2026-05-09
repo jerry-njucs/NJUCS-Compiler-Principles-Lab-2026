@@ -6,6 +6,9 @@
 static int temp_cnt = 0;
 static int label_cnt = 0;
 
+// 前向声明
+static CodeList* translate_CompSt(Node* node);
+
 // helpers
 static char* ic_strdup(const char* s) {
     if (!s) return NULL;
@@ -240,17 +243,115 @@ void print_codelist(FILE* out, CodeList* list) {
 }
 
 // four important components
-static CodeList* translate_Exp(Node* node) {
+static CodeList* translate_Exp(Node* node, Operand* op) {
+
+}
+
+static CodeList* translate_Cond(Node* node, Operand label_true, Operand label_false) {
 
 }
 
 static CodeList* translate_Stmt(Node* node) {
+    if (!node || !is_node(node, "Stmt"))
+        return NULL;
 
+    Node* first = node->child;
+
+    if (first && is_node(first, "Exp")) {  // Exp SEMI
+        return translate_Exp(first, NULL);
+    }
+    if (first && is_node(first, "CompSt")) {  // CompSt
+        return translate_CompSt(first);
+    }
+    if (first && is_node(first, "RETURN")) {  // RETURN Exp SEMI
+        Node* exp = first->next;
+        Operand t1 = new_temp();
+        CodeList* code1 = translate_Exp(exp, &t1);
+        InterCode* ret_code = new_intercode(RETURN);
+        ret_code->u.one.op = t1;
+        CodeList* code2 = new_codelist(ret_code);
+        return join_codelist(code1, code2);
+    }
+    if (first && is_node(first, "IF")) {
+        Node* exp = first->next->next;
+        Node* stmt1 = exp->next->next;
+
+        if (stmt1->next && is_node(stmt1->next, "ELSE")) {  // IF Exp Stmt ELSE Stmt
+            Node* stmt2 = stmt1->next->next;
+            Operand label1 = new_label();
+            Operand label2 = new_label();
+            Operand label3 = new_label();
+
+            CodeList* code1 = translate_Cond(exp, label1, label2);
+            CodeList* code2 = translate_Stmt(stmt1);
+            CodeList* code3 = translate_Stmt(stmt2);
+
+            InterCode* l1 = new_intercode(LABEL);
+            l1->u.one.op = label1;
+            InterCode* l2 = new_intercode(LABEL);
+            l2->u.one.op = label2;
+            InterCode* l3 = new_intercode(LABEL);
+            l3->u.one.op = label3;
+
+            InterCode* go = new_intercode(GOTO);
+            go->u.one.op = label3;
+
+            CodeList* whole = join_codelist(code1, new_codelist(l1));
+            whole = join_codelist(whole, code2);
+            whole = join_codelist(whole, new_codelist(go));
+            whole = join_codelist(whole, new_codelist(l2));
+            whole = join_codelist(whole, code3);
+            whole = join_codelist(whole, new_codelist(l3));
+            return whole;
+        } else {  // IF Exp Stmt
+            Operand label1 = new_label();
+            Operand label2 = new_label();
+            CodeList* code1 = translate_Cond(exp, label1, label2);
+            CodeList* code2 = translate_Stmt(stmt1);
+
+            InterCode* l1 = new_intercode(LABEL);
+            l1->u.one.op = label1;
+            InterCode* l2 = new_intercode(LABEL);
+            l2->u.one.op = label2;
+
+            CodeList* whole_code = join_codelist(code1, new_codelist(l1));
+            whole_code = join_codelist(whole_code, code2);
+            whole_code = join_codelist(whole_code, new_codelist(l2));
+            return whole_code;
+        }
+    }
+    if (first && is_node(first, "WHILE")) { // WHILE Exp Stmt
+        Node* exp = first->next->next;
+        Node* stmt = exp->next->next;
+
+        Operand label1 = new_label();
+        Operand label2 = new_label();
+        Operand label3 = new_label();
+
+        CodeList* code1 = translate_Cond(exp, label2, label3);
+        CodeList* code2 = translate_Stmt(stmt);
+
+        InterCode* l1 = new_intercode(LABEL);
+        l1->u.one.op = label1;
+        InterCode* l2 = new_intercode(LABEL);
+        l2->u.one.op = label2;
+        InterCode* l3 = new_intercode(LABEL);
+        l3->u.one.op = label3;
+
+        InterCode* goto_l1 = new_intercode(GOTO);
+        goto_l1->u.one.op = label1;
+
+        CodeList* whole_code = join_codelist(new_codelist(l1), code1);
+        whole_code = join_codelist(whole_code, new_codelist(l2));
+        whole_code = join_codelist(whole_code, code2);
+        whole_code = join_codelist(whole_code, new_codelist(goto_l1));
+        whole_code = join_codelist(whole_code, new_codelist(l3));
+        return whole_code;
+    }
+
+    return NULL;
 }
 
-static CodeList* translate_Cond(Node* node) {
-
-}
 static CodeList* translate_Args(Node* node) {
 
 }
