@@ -15,9 +15,52 @@ unsigned int hash_pjw(const char* name) {
     return val;
 }
 
+static char* my_strdup(const char* s) {
+    size_t n;
+    char *p;
+    if (!s) return NULL;
+    n = strlen(s);
+    p = (char *)malloc(n + 1);
+    if (!p) return NULL;
+    memcpy(p, s, n + 1);
+    return p;
+}
+
+// 内建类型/参数构造
+static Type make_basic_int_type(void) {
+    Type t = (Type)calloc(1, sizeof(struct Type_));
+    if (!t) return NULL;
+    t->kind = BASIC;
+    t->content.basic = 0;
+    return t;
+}
+
+static FieldList make_param(const char* name, Type type) {
+    FieldList f = (FieldList)calloc(1, sizeof(struct FieldList_));
+    if (!f) return NULL;
+    f->name = my_strdup(name);
+    f->type = type;
+    f->tail = NULL;
+    return f;
+}
+
 void init_symbol_table() {
     for (int i = 0; i < HASH_SIZE; i++)
         hash_table[i] = NULL;
+
+    // builtin: int read() 
+    {
+        Type ret = make_basic_int_type();
+        insert_func("read", ret, NULL, 0);
+    }
+
+    // builtin: int write(int x) 
+    {
+        Type ret = make_basic_int_type();
+        Type param_type = make_basic_int_type();
+        FieldList params = make_param("x", param_type);
+        insert_func("write", ret, params, 0);
+    }
 }
 
 void destroy_symbol_table() {
@@ -54,17 +97,6 @@ static int insert_symbol(Symbol s) {
     s->next = hash_table[target];
     hash_table[target] = s;
     return 1;
-}
-
-static char* my_strdup(const char* s) {
-    size_t n;
-    char *p;
-    if (!s) return NULL;
-    n = strlen(s);
-    p = (char *)malloc(n + 1);
-    if (!p) return NULL;
-    memcpy(p, s, n + 1);
-    return p;
 }
 
 static Symbol new_symbol(const char* name, SymbolKind kind, int lineno) {
