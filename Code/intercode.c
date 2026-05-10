@@ -14,6 +14,7 @@ typedef struct ArgList_ {
 // 前向声明
 static CodeList* translate_CompSt(Node* node);
 static CodeList* translate_Args(Node* node, ArgList** arg_list);
+static CodeList* translate_Cond(Node* node, Operand label_true, Operand label_false);
 
 // helpers
 static char* ic_strdup(const char* s) {
@@ -47,6 +48,10 @@ static ArgList* arglist_push_front(ArgList* head, Operand op) {
     n->op = op;
     n->next = head;
     return n;
+}
+
+static int get_int_value(Node* n) {
+    return n->intvalue;
 }
 
 /* Operand 构造 */
@@ -279,6 +284,128 @@ static CodeList* translate_Exp(Node* node, Operand* place) {
     Node* third = second ? second->next : NULL;
     Node* fourth = third ? third->next : NULL;
 
+    if (first && is_node(first, "INT")) {  // INT
+        if (!place) {
+            Operand tmp = new_temp();
+            place = &tmp;
+        }
+        InterCode* asn = new_intercode(ASSIGN);
+        asn->u.assign.left = *place;
+        asn->u.assign.right = new_constant(get_int_value(first));
+        return new_codelist(asn);
+    }
+    if (first && is_node(first, "ID") && !second) {
+        if (!place) {
+            Operand tmp = new_temp();
+            place = &tmp;
+        }
+        InterCode* asn = new_intercode(ASSIGN);
+        asn->u.assign.left = *place;
+        asn->u.assign.right = new_variable(first->idname);
+        return new_codelist(asn);
+    }
+    if (first && is_node(first, "Exp") && second && is_node(second, "ASSIGNOP") && third && is_node(third, "Exp")) {
+        Node* left = first->child;
+        if (left && is_node(left, "ID")) {
+            Operand t1 = new_temp();
+            CodeList* code1 = translate_Exp(third, &t1);
+
+            InterCode* asn1 = new_intercode(ASSIGN);
+            asn1->u.assign.left = new_variable(left->idname);
+            asn1->u.assign.right = t1;
+
+            CodeList* code2 = new_codelist(asn1);
+
+            if (place) {
+                InterCode* asn2 = new_intercode(ASSIGN);
+                asn2->u.assign.left = *place;
+                asn2->u.assign.right = new_variable(left->idname);
+                CodeList* code3 = new_codelist(asn2);
+                return join_codelist(code1, join_codelist(code2, code3));
+            }
+            return join_codelist(code1, code2);
+        }
+    }
+    if (first && is_node(first, "Exp") && second && third && is_node(third, "Exp")) {
+        InterCodeKind k;
+        if (is_node(second, "PLUS")) k = PLUS;
+        else if (is_node(second, "MINUS")) k = MINUS;
+        else if (is_node(second, "STAR")) k = STAR;
+        else if (is_node(second, "DIV")) k = DIV;
+        else k = -1;
+
+        if (k != -1) {
+            Operand t1 = new_temp();
+            Operand t2 = new_temp();
+            CodeList* code1 = translate_Exp(first, &t1);
+            CodeList* code2 = translate_Exp(third, &t2);
+
+            if (!place) {
+                Operand tmp = new_temp();
+                place = &tmp;
+            }
+            InterCode* bin = new_intercode(k);
+            bin->u.binop.result = *place;
+            bin->u.binop.op1 = t1;
+            bin->u.binop.op2 = t2;
+
+            return join_codelist(join_codelist(code1, code2), new_codelist(bin));
+        }
+    }
+    if (first && is_node(first, "MINUS") && second && is_node(second, "Exp")) {
+        Operand t1 = new_temp();
+        CodeList* code1 = translate_Exp(second, &t1);
+
+        if (!place) {
+            Operand tmp = new_temp();
+            place = &tmp;
+        }
+        InterCode* bin = new_intercode(MINUS);
+        bin->u.binop.result = *place;
+        bin->u.binop.op1 = new_constant(0);
+        bin->u.binop.op2 = t1;
+
+        return join_codelist(code1, new_codelist(bin));
+    }
+    if ((second && is_node(second, "RELOP")) || (first && is_node(first, "NOT")) ||
+        (second && (is_node(second, "AND") || is_node(second, "OR")))) {
+
+        if (!place) {
+            Operand tmp = new_temp();
+            place = &tmp;
+        }
+
+        Operand label1 = new_label();
+        Operand label2 = new_label();
+
+        /* code0: place := #0 */
+        InterCode* asn0 = new_intercode(ASSIGN);
+        asn0->u.assign.left = *place;
+        asn0->u.assign.right = new_constant(0);
+
+        CodeList* code0 = new_codelist(asn0);
+        CodeList* code1 = translate_Cond(node, label1, label2);
+
+        InterCode* l1 = new_intercode(LABEL);
+        l1->u.one.op = label1;
+
+        InterCode* asn1 = new_intercode(ASSIGN);
+        asn1->u.assign.left = *place;
+        asn1->u.assign.right = new_constant(1);
+
+        InterCode* l2 = new_intercode(LABEL);
+        l2->u.one.op = label2;
+
+        CodeList* code2 = new_codelist(l1);
+        CodeList* code3 = new_codelist(asn1);
+        CodeList* code4 = new_codelist(l2);
+
+        CodeList* whole = join_codelist(code0, code1);
+        whole = join_codelist(whole, code2);
+        whole = join_codelist(whole, code3);
+        whole = join_codelist(whole, code4);
+        return whole;
+    }
     if (first && is_node(first, "ID") && second && is_node(second, "LP") && 
         third && is_node(third, "RP")) {  // ID LP RP
         const char* funcname = first->idname;
