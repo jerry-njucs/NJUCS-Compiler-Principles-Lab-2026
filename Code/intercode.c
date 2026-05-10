@@ -54,6 +54,34 @@ static int get_int_value(Node* n) {
     return n->intvalue;
 }
 
+static const char* get_vardec_id(Node* varDec) {
+    if (!varDec) return NULL;
+    Node* cur = varDec;
+    while (cur && !is_node(cur, "ID")) {
+        cur = cur->child;
+    }
+    return cur ? cur->idname : NULL;
+}
+
+/* 若 Exp 是 ID 或 INT，则直接生成 Operand，且不产生任何代码 */
+static int exp_to_operand_if_simple(Node* exp, Operand* out) {
+    if (!exp || !is_node(exp, "Exp")) return 0;
+    Node* first = exp->child;
+    Node* second = first ? first->next : NULL;
+
+    /* Exp -> ID */
+    if (first && is_node(first, "ID") && !second) {
+        *out = new_variable(first->idname);
+        return 1;
+    }
+    /* Exp -> INT */
+    if (first && is_node(first, "INT")) {
+        *out = new_constant(get_int_value(first));
+        return 1;
+    }
+    return 0;
+}
+
 /* Operand 构造 */
 Operand new_temp(void) {
     Operand op;
@@ -440,15 +468,16 @@ static CodeList* translate_Exp(Node* node, Operand* place) {
             if (arg_list) {
                 InterCode* wr = new_intercode(WRITE);
                 wr->u.one.op = arg_list->op;
-
-                /* place := #0 */
-                InterCode* asn = new_intercode(ASSIGN);
-                asn->u.assign.left = *dest;
-                asn->u.assign.right = new_constant(0);
-
                 CodeList* code2 = new_codelist(wr);
-                CodeList* code3 = new_codelist(asn);
-                return join_codelist(code1, join_codelist(code2, code3));
+
+                if (place) { /* 只有 place 非空才写回 #0 */
+                    InterCode* asn = new_intercode(ASSIGN);
+                    asn->u.assign.left = *place;
+                    asn->u.assign.right = new_constant(0);
+                    CodeList* code3 = new_codelist(asn);
+                    return join_codelist(code1, join_codelist(code2, code3));
+                }
+                return join_codelist(code1, code2);
             }
             return code1;
         }
@@ -472,39 +501,50 @@ static CodeList* translate_Exp(Node* node, Operand* place) {
 }
 
 static CodeList* translate_Cond(Node* node, Operand label_true, Operand label_false) {
-    if (!node || !is_node(node, "Exp"))
-        return NULL;
+    if (!node || !is_node(node, "Exp")) return NULL;
 
     Node* first = node->child;
     Node* second = first ? first->next : NULL;
     Node* third = second ? second->next : NULL;
 
-    if (first && is_node(first, "Exp") && second && is_node(second, "RELOP") && third && is_node(third, "Exp")) {  // Exp RELOP Exp
-        Operand t1 = new_temp();
-        Operand t2 = new_temp();
-        CodeList* code1 = translate_Exp(first, &t1);
-        CodeList* code2 = translate_Exp(third, &t2);
-        const char* relop = relop_to_str(second);
+    /* Exp1 RELOP Exp2 */
+    if (first && is_node(first, "Exp") && second && is_node(second, "RELOP") && third && is_node(third, "Exp")) {
+        Operand op1, op2;
+        CodeList* code1 = NULL;
+        CodeList* code2 = NULL;
+
+        if (!exp_to_operand_if_simple(first, &op1)) {
+            Operand t1 = new_temp();
+            code1 = translate_Exp(first, &t1);
+            op1 = t1;
+        }
+        if (!exp_to_operand_if_simple(third, &op2)) {
+            Operand t2 = new_temp();
+            code2 = translate_Exp(third, &t2);
+            op2 = t2;
+        }
 
         InterCode* if_code = new_intercode(IF_GOTO);
-        if_code->u.if_goto.x = t1;
-        if_code->u.if_goto.y = t2;
-        snprintf(if_code->u.if_goto.relop, sizeof(if_code->u.if_goto.relop), "%s", relop);
+        if_code->u.if_goto.x = op1;
+        if_code->u.if_goto.y = op2;
+        snprintf(if_code->u.if_goto.relop, sizeof(if_code->u.if_goto.relop), "%s", relop_to_str(second));
         if_code->u.if_goto.z = label_true;
 
-        InterCode* goto_false = new_intercode(GOTO);
-        goto_false->u.one.op = label_false;
+        InterCode* go = new_intercode(GOTO);
+        go->u.one.op = label_false;
 
-        CodeList* whole_code = join_codelist(code1, code2);
-        whole_code = join_codelist(whole_code, new_codelist(if_code));
-        whole_code = join_codelist(whole_code, new_codelist(goto_false));
-        return whole_code;
+        CodeList* whole = join_codelist(code1, code2);
+        whole = join_codelist(whole, new_codelist(if_code));
+        whole = join_codelist(whole, new_codelist(go));
+        return whole;
     }
 
-    if (is_node(first, "NOT")) {  // NOT Exp
+    /* NOT Exp */
+    if (is_node(first, "NOT")) {
         return translate_Cond(second, label_false, label_true);
     }
-    if (second && is_node(second, "AND")) {  // Exp AND Exp
+    /* Exp AND Exp */
+    if (second && is_node(second, "AND")) {
         Operand label1 = new_label();
         CodeList* code1 = translate_Cond(first, label1, label_false);
         CodeList* code2 = translate_Cond(third, label_true, label_false);
@@ -516,8 +556,8 @@ static CodeList* translate_Cond(Node* node, Operand label_true, Operand label_fa
         whole_code = join_codelist(whole_code, code2);
         return whole_code;
     }
-
-    if (second && is_node(second, "OR")) {  // Exp OR Exp
+    /* Exp OR Exp */
+    if (second && is_node(second, "OR")) {
         Operand label1 = new_label();
         CodeList* code1 = translate_Cond(first, label_true, label1);
         CodeList* code2 = translate_Cond(third, label_true, label_false);
@@ -693,8 +733,50 @@ static CodeList* translate_CompSt(Node* node) {  // 语句块
     return join_codelist(code1, code2);
 }  
 
-static CodeList* translate_FunDec(Node* node) {  // 函数头
+/* ParamDec -> Specifier VarDec */
+static CodeList* translate_ParamDec(Node* node) {
+    if (!node || !is_node(node, "ParamDec")) return NULL;
+    Node* varDec = node->child ? node->child->next : NULL;
+    const char* name = get_vardec_id(varDec);
+    if (!name) return NULL;
 
+    InterCode* p = new_intercode(PARAM);
+    p->u.one.op = new_variable(name);
+    return new_codelist(p);
+}
+
+/* VarList -> ParamDec COMMA VarList | ParamDec */
+static CodeList* translate_VarList(Node* node) {
+    if (!node || !is_node(node, "VarList")) return NULL;
+    Node* param = node->child;
+    Node* comma = param ? param->next : NULL;
+    Node* rest = comma ? comma->next : NULL;
+
+    CodeList* code1 = translate_ParamDec(param);
+    if (comma && is_node(comma, "COMMA")) {
+        CodeList* code2 = translate_VarList(rest);
+        return join_codelist(code1, code2);
+    }
+    return code1;
+}
+static CodeList* translate_FunDec(Node* node) {  // 函数头
+    if (!node || !is_node(node, "FunDec")) return NULL;
+
+    Node* id = node->child;              // ID
+    Node* lp = id ? id->next : NULL;     // LP
+    Node* varlist = lp ? lp->next : NULL; // VarList or RP
+
+    /* FUNCTION f : */
+    InterCode* f = new_intercode(FUNCTION);
+    f->u.one.op = new_function(id->idname);
+    CodeList* code1 = new_codelist(f);
+
+    /* 参数列表 */
+    if (varlist && is_node(varlist, "VarList")) {
+        CodeList* code2 = translate_VarList(varlist);
+        return join_codelist(code1, code2);
+    }
+    return code1;
 }
 static CodeList* translate_ExtDef(Node* node) {
     // 在这里忽略全局变量和结构体的定义
