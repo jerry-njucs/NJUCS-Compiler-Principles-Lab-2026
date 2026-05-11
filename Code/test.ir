@@ -1,64 +1,78 @@
-FUNCTION main :
+FUNCTION average :
+PARAM class
 t1 := #0
-i := t1
-t2 := #5
-N := t2
-t3 := #0
-j := t3
+scoreSum := t1
+t2 := #0
+i := t2
+t5 := &class
+t6 := t5 + #800
+t3 := *t6
+N := t3
 LABEL label1 :
-IF i < #5 GOTO label2
+IF i < N GOTO label2
 GOTO label3
 LABEL label2 :
-t5 := i
-t6 := #1
-t4 := t5 + t6
-i := t4
+t13 := &class
+t14 := t13 + #0
+t15 := i
+t16 := t15 * #8
+t17 := t14 + t16
+t18 := t17 + #0
+t8 := *t18
+t9 := scoreSum
+t7 := t8 + t9
+scoreSum := t7
+t20 := i
+t21 := #1
+t19 := t20 + t21
+i := t19
 GOTO label1
 LABEL label3 :
-t7 := N
-i := t7
+t23 := scoreSum
+t24 := N
+t22 := t23 / t24
+RETURN t22
+FUNCTION main :
+DEC classInit 804
+t25 := #0
+result := t25
+t26 := #10
+initN := t26
+t27 := #0
+j := t27
+t29 := &classInit
+t30 := t29 + #800
+t31 := initN
+*t30 := t31
 LABEL label4 :
-IF i > #0 GOTO label5
+IF j < initN GOTO label5
 GOTO label6
 LABEL label5 :
-LABEL label7 :
-t9 := i
-t10 := #1
-t8 := t9 - t10
-IF j < t8 GOTO label8
-GOTO label9
-LABEL label8 :
-IF t11 > t12 GOTO label10
-GOTO label11
-LABEL label10 :
-temp := t13
-LABEL label11 :
-t15 := j
-t16 := #1
-t14 := t15 + t16
-j := t14
-GOTO label7
-LABEL label9 :
-t17 := #0
-j := t17
-t19 := i
-t20 := #1
-t18 := t19 - t20
-i := t18
+t35 := &classInit
+t36 := t35 + #0
+t37 := j
+t38 := t37 * #8
+t39 := t36 + t38
+t40 := t39 + #0
+t44 := j
+t45 := #1
+t42 := t44 + t45
+t46 := j
+t47 := #1
+t43 := t46 + t47
+t41 := t42 * t43
+*t40 := t41
+t49 := j
+t50 := #1
+t48 := t49 + t50
+j := t48
 GOTO label4
 LABEL label6 :
-t21 := #0
-i := t21
-LABEL label12 :
-IF i < #5 GOTO label13
-GOTO label14
-LABEL label13 :
-WRITE t22
-t25 := i
-t26 := #1
-t24 := t25 + t26
-i := t24
-GOTO label12
-LABEL label14 :
-t27 := #0
-RETURN t27
+t53 := &classInit
+ARG t53
+t51 := CALL average
+result := t51
+t54 := result
+WRITE t54
+t56 := #0
+RETURN t56

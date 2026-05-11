@@ -1,5 +1,6 @@
 #include "intercode.h"
 #include "Node.h"
+#include "Symbol_table.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,7 +18,7 @@ static CodeList* translate_Args(Node* node, ArgList** arg_list);
 static CodeList* translate_Cond(Node* node, Operand label_true, Operand label_false);
 static CodeList* translate_Exp_Addr(Node* exp, Operand* addr_place);
 
-// helpers
+// helper functions
 static char* ic_strdup(const char* s) {
     if (!s) return NULL;
     size_t n = strlen(s) + 1;
@@ -90,18 +91,78 @@ static Node* find_child(Node* n, const char* type) {
     return NULL;
 }
 
-static int get_vardec_size_and_id(Node* varDec, const char** id_out) {
-    if (!varDec) return 4;
-    if (is_node(varDec->child, "ID")) {
-        *id_out = varDec->child->idname;
-        return 4;
-    } else if (is_node(varDec->child, "VarDec")) {
-        Node* inner = varDec->child;
-        Node* int_node = inner->next->next; // VarDec LB INT RB
-        int size = get_int_value(int_node);
-        return size * get_vardec_size_and_id(inner, id_out);
+static int get_type_size(Type type) {
+    if (!type) return 4;
+    if (type->kind == BASIC) return 4;
+    if (type->kind == ARRAY) return type->content.array.size * get_type_size(type->content.array.elem);
+    if (type->kind == STRUCTURE) {
+        int size = 0;
+        FieldList f = type->content.structure;
+        while (f) {
+            size += get_type_size(f->type);
+            f = f->tail;
+        }
+        return size;
     }
     return 4;
+}
+
+// 极其简单直接：名字丢给符号表，拿到最终 Type 即可拿到精准总大小，无须手撕语法树乘法！
+static int get_vardec_size_and_id(Node* varDec, const char** id_out) {
+    *id_out = get_vardec_id(varDec); // 复用已有的查找底层ID名的函数
+    if (*id_out) {
+        Symbol s = lookup(*id_out);
+        if (s && s->kind == SYM_VAR) {
+            return get_type_size(s->u.var_type);
+        }
+    }
+    return 4;
+}
+
+static Type get_exp_type(Node* exp) {
+    if (!exp || !is_node(exp, "Exp")) return NULL;
+    Node* first = exp->child;
+    Node* second = first ? first->next : NULL;
+
+    if (first && is_node(first, "ID") && !second) {
+        Symbol s = lookup(first->idname);
+        return (s && s->kind == SYM_VAR) ? s->u.var_type : NULL;
+    }
+    if (first && is_node(first, "Exp") && second && is_node(second, "DOT")) {
+        Type base = get_exp_type(first);
+        if (base && base->kind == STRUCTURE) {
+            Node* id_node = second->next;
+            FieldList f = base->content.structure;
+            while (f) {
+                if (strcmp(f->name, id_node->idname) == 0) return f->type;
+                f = f->tail;
+            }
+        }
+    }
+    if (first && is_node(first, "Exp") && second && is_node(second, "LB")) {
+        Type base = get_exp_type(first);
+        if (base && base->kind == ARRAY) return base->content.array.elem;
+    }
+    return NULL;
+}
+
+static int get_field_offset(Node* exp, const char* field_name) {
+    Type base_type = get_exp_type(exp);
+    if (!base_type || base_type->kind != STRUCTURE) return 0;
+    int offset = 0;
+    FieldList f = base_type->content.structure;
+    while (f) {
+        if (strcmp(f->name, field_name) == 0) break;
+        offset += get_type_size(f->type);
+        f = f->tail;
+    }
+    return offset;
+}
+
+static int check_is_struct_or_array(Node* exp) {
+    Type t = get_exp_type(exp);
+    if (t && (t->kind == ARRAY || t->kind == STRUCTURE)) return 1;
+    return 0;
 }
 
 /* Operand 构造 */
@@ -384,7 +445,7 @@ static CodeList* translate_Exp(Node* node, Operand* place) {
             return join_codelist(code1, code2);
         }
         /* 数组元素赋值 Exp[Exp] = Exp */
-        else if (left && is_node(left, "Exp") && left_sec && is_node(left_sec, "LB")) {
+        else if (left && is_node(left, "Exp") && left_sec && (is_node(left_sec, "LB") || is_node(left_sec, "DOT"))) {
             Operand addr;
             CodeList* code1 = translate_Exp_Addr(first, &addr); /* 计算左值地址 */
 
@@ -407,7 +468,7 @@ static CodeList* translate_Exp(Node* node, Operand* place) {
             return res;
         }
     }
-    if (first && is_node(first, "Exp") && second && is_node(second, "LB")) {
+    if (first && is_node(first, "Exp") && second && (is_node(second, "LB") || is_node(second, "DOT"))) {
         Operand addr;
         CodeList* code1 = translate_Exp_Addr(node, &addr);
         if (place) {
@@ -761,7 +822,15 @@ static CodeList* translate_Args(Node* node, ArgList** arg_list) {
     Node* args = comma ? comma->next : NULL;
 
     Operand t1 = new_temp();
-    CodeList* code1 = translate_Exp(exp, &t1);
+    CodeList* code1 = NULL;
+
+    /* 检查是否为结构体或数组，若属于则传地址 */
+    if (check_is_struct_or_array(exp)) {
+        code1 = translate_Exp_Addr(exp, &t1);
+    } else {
+        code1 = translate_Exp(exp, &t1);
+    }
+    
     *arg_list = arglist_push_front(*arg_list, t1);
 
     if (comma && is_node(comma, "COMMA")) {  // 参数不止一个
@@ -817,7 +886,7 @@ static CodeList* translate_Exp_Addr(Node* exp, Operand* addr_place) {
         return new_codelist(ga);
     }
 
-    /* Exp -> Exp LB Exp RB (一维数组访问) */
+    /* Exp -> Exp LB Exp RB (一维数组访问 / 高维数组按题意不考虑可适用此扩展) */
     if (first && is_node(first, "Exp") && second && is_node(second, "LB")) {
         Node* index_exp = second->next;
         
@@ -826,12 +895,15 @@ static CodeList* translate_Exp_Addr(Node* exp, Operand* addr_place) {
 
         Operand index_val = new_temp();
         CodeList* code2 = translate_Exp(index_exp, &index_val);
+        
+        Type elem_type = get_exp_type(exp); 
+        int elem_size = get_type_size(elem_type); /* 动态获取数组元素的大小 */
 
         Operand offset = new_temp();
         InterCode* mul = new_intercode(STAR);
         mul->u.binop.result = offset;
         mul->u.binop.op1 = index_val;
-        mul->u.binop.op2 = new_constant(4);
+        mul->u.binop.op2 = new_constant(elem_size);
 
         *addr_place = new_temp();
         InterCode* add = new_intercode(PLUS);
@@ -843,6 +915,23 @@ static CodeList* translate_Exp_Addr(Node* exp, Operand* addr_place) {
         res = join_codelist(res, new_codelist(mul));
         res = join_codelist(res, new_codelist(add));
         return res;
+    }
+    
+    /* Exp -> Exp DOT ID (结构体访问) */
+    if (first && is_node(first, "Exp") && second && is_node(second, "DOT")) {
+        Node* id_node = second->next;
+        Operand base_addr = new_temp();
+        CodeList* code1 = translate_Exp_Addr(first, &base_addr);
+
+        int offset = get_field_offset(first, id_node->idname);
+
+        *addr_place = new_temp();
+        InterCode* add = new_intercode(PLUS);
+        add->u.binop.result = *addr_place;
+        add->u.binop.op1 = base_addr;
+        add->u.binop.op2 = new_constant(offset);
+
+        return join_codelist(code1, new_codelist(add));
     }
     return NULL;
 }

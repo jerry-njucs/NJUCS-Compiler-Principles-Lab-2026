@@ -674,8 +674,8 @@ void semantic_check(struct Node *root) {
 
     // 错误18（声明未定义）
     report_error18_for_undefined_declared_functions();
-
-    destroy_symbol_table();
+    // 符号表，你要至少活到中间代码生成结束呀！！！
+    //destroy_symbol_table();
 }
 
 static int type_equal(Type a, Type b) {
