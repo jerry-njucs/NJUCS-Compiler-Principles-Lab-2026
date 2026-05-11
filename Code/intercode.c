@@ -82,6 +82,13 @@ static int exp_to_operand_if_simple(Node* exp, Operand* out) {
     return 0;
 }
 
+static Node* find_child(Node* n, const char* type) {
+    for (Node* p = n ? n->child : NULL; p; p = p->next) {
+        if (is_node(p, type)) return p;
+    }
+    return NULL;
+}
+
 /* Operand 构造 */
 Operand new_temp(void) {
     Operand op;
@@ -311,6 +318,11 @@ static CodeList* translate_Exp(Node* node, Operand* place) {
     Node* second = first ? first->next : NULL;
     Node* third = second ? second->next : NULL;
     Node* fourth = third ? third->next : NULL;
+
+    /* Exp -> LP Exp RP */
+    if (first && is_node(first, "LP") && second && is_node(second, "Exp") && third && is_node(third, "RP")) {
+        return translate_Exp(second, place);
+    }
 
     if (first && is_node(first, "INT")) {  // INT
         if (!place) {
@@ -712,23 +724,24 @@ static CodeList* translate_DefList(Node* node) {
 }
 
 static CodeList* translate_StmtList(Node* node) {
-    if (!node || !is_node(node, "StmtList"))
+    if (!node || !is_node(node, "StmtList") || !node->child)
         return NULL;
 
-    Node* stmt = node->child;  // Stmt
-    Node* stmtlist = stmt->next;  // StmtList
+    Node* stmt = node->child;      // Stmt
+    Node* stmtlist = stmt->next;   // StmtList
     CodeList* code1 = translate_Stmt(stmt);
     CodeList* code2 = translate_StmtList(stmtlist);
-    return join_codelist(code1, code2);  // List系列，直接拼接
+    return join_codelist(code1, code2);
 }
 
 static CodeList* translate_CompSt(Node* node) {  // 语句块
     if (!node || !is_node(node, "CompSt"))
         return NULL;
 
-    Node* deflist = node->child->next;  // DefList
-    Node* stmtlist = deflist->next;  // StmtList
-    CodeList* code1 = translate_DefList(deflist);  // 赋值情况涉及ASSIGN，数组情况涉及DEC
+    Node* deflist = find_child(node, "DefList");
+    Node* stmtlist = find_child(node, "StmtList");
+
+    CodeList* code1 = translate_DefList(deflist);
     CodeList* code2 = translate_StmtList(stmtlist);
     return join_codelist(code1, code2);
 }  
