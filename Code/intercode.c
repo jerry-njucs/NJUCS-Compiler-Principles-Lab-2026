@@ -719,8 +719,68 @@ static CodeList* translate_Args(Node* node, ArgList** arg_list) {
     return code1;
 }
 
+/* Dec -> VarDec | VarDec ASSIGNOP Exp */
+static CodeList* translate_Dec(Node* node) {
+    if (!node || !is_node(node, "Dec")) return NULL;
+    Node* vardec = node->child;
+    Node* assignop = vardec ? vardec->next : NULL;
+    
+    /* 仅处理带有初始化的定义：VarDec ASSIGNOP Exp */
+    if (assignop && is_node(assignop, "ASSIGNOP")) {
+        Node* exp = assignop->next;
+        const char* var_name = get_vardec_id(vardec);
+        if (var_name) {
+            Operand t1 = new_temp();
+            CodeList* code1 = translate_Exp(exp, &t1);
+            
+            InterCode* asn = new_intercode(ASSIGN);
+            asn->u.assign.left = new_variable(var_name);
+            asn->u.assign.right = t1;
+            
+            return join_codelist(code1, new_codelist(asn));
+        }
+    }
+    /* 如果只是声明没有初始化 (如 int a;) 或者当前不支持的 DEC 数组结构体等，暂时返回 NULL */
+    return NULL;
+}
+
+/* DecList -> Dec | Dec COMMA DecList */
+static CodeList* translate_DecList(Node* node) {
+    if (!node || !is_node(node, "DecList")) return NULL;
+    Node* dec = node->child;
+    Node* comma = dec ? dec->next : NULL;
+    
+    CodeList* code1 = translate_Dec(dec);
+    if (comma && is_node(comma, "COMMA")) {
+        CodeList* code2 = translate_DecList(comma->next);
+        return join_codelist(code1, code2);
+    }
+    return code1;
+}
+
+/* Def -> Specifier DecList SEMI */
+static CodeList* translate_Def(Node* node) {
+    if (!node || !is_node(node, "Def")) return NULL;
+    Node* declist = node->child ? node->child->next : NULL;
+    
+    if (declist && is_node(declist, "DecList")) {
+        return translate_DecList(declist);
+    }
+    return NULL;
+}
+
+/* DefList -> Def DefList | empty */
 static CodeList* translate_DefList(Node* node) {
-// 赋值情况涉及ASSIGN，数组情况涉及DEC
+    if (!node || !is_node(node, "DefList") || !node->child)
+        return NULL;
+        
+    Node* def = node->child;
+    Node* deflist = def->next;
+    
+    CodeList* code1 = translate_Def(def);
+    CodeList* code2 = translate_DefList(deflist);
+    
+    return join_codelist(code1, code2);
 }
 
 static CodeList* translate_StmtList(Node* node) {
