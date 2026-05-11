@@ -15,6 +15,7 @@ typedef struct ArgList_ {
 static CodeList* translate_CompSt(Node* node);
 static CodeList* translate_Args(Node* node, ArgList** arg_list);
 static CodeList* translate_Cond(Node* node, Operand label_true, Operand label_false);
+static CodeList* translate_Exp_Addr(Node* exp, Operand* addr_place);
 
 // helpers
 static char* ic_strdup(const char* s) {
@@ -87,6 +88,20 @@ static Node* find_child(Node* n, const char* type) {
         if (is_node(p, type)) return p;
     }
     return NULL;
+}
+
+static int get_vardec_size_and_id(Node* varDec, const char** id_out) {
+    if (!varDec) return 4;
+    if (is_node(varDec->child, "ID")) {
+        *id_out = varDec->child->idname;
+        return 4;
+    } else if (is_node(varDec->child, "VarDec")) {
+        Node* inner = varDec->child;
+        Node* int_node = inner->next->next; // VarDec LB INT RB
+        int size = get_int_value(int_node);
+        return size * get_vardec_size_and_id(inner, id_out);
+    }
+    return 4;
 }
 
 /* Operand 构造 */
@@ -346,7 +361,10 @@ static CodeList* translate_Exp(Node* node, Operand* place) {
     }
     if (first && is_node(first, "Exp") && second && is_node(second, "ASSIGNOP") && third && is_node(third, "Exp")) {
         Node* left = first->child;
-        if (left && is_node(left, "ID")) {
+        Node* left_sec = left ? left->next : NULL;
+
+        /* ID 赋值 */
+        if (left && is_node(left, "ID") && !left_sec) {
             Operand t1 = new_temp();
             CodeList* code1 = translate_Exp(third, &t1);
 
@@ -365,6 +383,40 @@ static CodeList* translate_Exp(Node* node, Operand* place) {
             }
             return join_codelist(code1, code2);
         }
+        /* 数组元素赋值 Exp[Exp] = Exp */
+        else if (left && is_node(left, "Exp") && left_sec && is_node(left_sec, "LB")) {
+            Operand addr;
+            CodeList* code1 = translate_Exp_Addr(first, &addr); /* 计算左值地址 */
+
+            Operand t1 = new_temp();
+            CodeList* code2 = translate_Exp(third, &t1);        /* 计算右值 */
+
+            InterCode* wm = new_intercode(WRITE_MEM);
+            wm->u.assign.left = addr;  // *addr
+            wm->u.assign.right = t1;   // := t1
+
+            CodeList* res = join_codelist(code1, code2);
+            res = join_codelist(res, new_codelist(wm));
+
+            if (place) {
+                InterCode* asn = new_intercode(ASSIGN);
+                asn->u.assign.left = *place;
+                asn->u.assign.right = t1;
+                res = join_codelist(res, new_codelist(asn));
+            }
+            return res;
+        }
+    }
+    if (first && is_node(first, "Exp") && second && is_node(second, "LB")) {
+        Operand addr;
+        CodeList* code1 = translate_Exp_Addr(node, &addr);
+        if (place) {
+            InterCode* rm = new_intercode(READ_MEM);
+            rm->u.assign.left = *place;
+            rm->u.assign.right = addr; /* place := *addr */
+            return join_codelist(code1, new_codelist(rm));
+        }
+        return code1;
     }
     if (first && is_node(first, "Exp") && second && third && is_node(third, "Exp")) {
         InterCodeKind k;
@@ -725,22 +777,73 @@ static CodeList* translate_Dec(Node* node) {
     Node* vardec = node->child;
     Node* assignop = vardec ? vardec->next : NULL;
     
-    /* 仅处理带有初始化的定义：VarDec ASSIGNOP Exp */
+    const char* var_name = NULL;
+    int size = get_vardec_size_and_id(vardec, &var_name);
+    
+    CodeList* code_dec = NULL;
+    /* 如果 size 大于 4，说明是数组，申请空间 */
+    if (size > 4 && var_name) {
+        InterCode* dec = new_intercode(DEC);
+        dec->u.dec.x = new_variable(var_name);
+        dec->u.dec.size = size;
+        code_dec = new_codelist(dec);
+    }
+
     if (assignop && is_node(assignop, "ASSIGNOP")) {
         Node* exp = assignop->next;
-        const char* var_name = get_vardec_id(vardec);
         if (var_name) {
             Operand t1 = new_temp();
             CodeList* code1 = translate_Exp(exp, &t1);
-            
             InterCode* asn = new_intercode(ASSIGN);
             asn->u.assign.left = new_variable(var_name);
             asn->u.assign.right = t1;
-            
-            return join_codelist(code1, new_codelist(asn));
+            return join_codelist(code_dec, join_codelist(code1, new_codelist(asn)));
         }
     }
-    /* 如果只是声明没有初始化 (如 int a;) 或者当前不支持的 DEC 数组结构体等，暂时返回 NULL */
+    return code_dec;
+}
+
+static CodeList* translate_Exp_Addr(Node* exp, Operand* addr_place) {
+    if (!exp || !is_node(exp, "Exp")) return NULL;
+    Node* first = exp->child;
+    Node* second = first ? first->next : NULL;
+
+    /* Exp -> ID */
+    if (first && is_node(first, "ID") && !second) {
+        *addr_place = new_temp();
+        InterCode* ga = new_intercode(GET_ADDR);
+        ga->u.assign.left = *addr_place;
+        ga->u.assign.right = new_variable(first->idname);
+        return new_codelist(ga);
+    }
+
+    /* Exp -> Exp LB Exp RB (一维数组访问) */
+    if (first && is_node(first, "Exp") && second && is_node(second, "LB")) {
+        Node* index_exp = second->next;
+        
+        Operand base_addr = new_temp();
+        CodeList* code1 = translate_Exp_Addr(first, &base_addr);
+
+        Operand index_val = new_temp();
+        CodeList* code2 = translate_Exp(index_exp, &index_val);
+
+        Operand offset = new_temp();
+        InterCode* mul = new_intercode(STAR);
+        mul->u.binop.result = offset;
+        mul->u.binop.op1 = index_val;
+        mul->u.binop.op2 = new_constant(4);
+
+        *addr_place = new_temp();
+        InterCode* add = new_intercode(PLUS);
+        add->u.binop.result = *addr_place;
+        add->u.binop.op1 = base_addr;
+        add->u.binop.op2 = offset;
+
+        CodeList* res = join_codelist(code1, code2);
+        res = join_codelist(res, new_codelist(mul));
+        res = join_codelist(res, new_codelist(add));
+        return res;
+    }
     return NULL;
 }
 
