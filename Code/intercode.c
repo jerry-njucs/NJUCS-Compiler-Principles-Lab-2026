@@ -113,6 +113,12 @@ static int get_vardec_size_and_id(Node* varDec, const char** id_out) {
     if (*id_out) {
         Symbol s = lookup(*id_out);
         if (s && s->kind == SYM_VAR) {
+            /* 新增拦截：拒绝多维数组 */
+            if (s->u.var_type && s->u.var_type->kind == ARRAY && 
+                s->u.var_type->content.array.elem->kind == ARRAY) {
+                printf("Cannot translate: Code contains variables of multi-dimensional array type or parameters of array type.\n");
+                exit(0);
+            }
             return get_type_size(s->u.var_type);
         }
     }
@@ -880,10 +886,22 @@ static CodeList* translate_Exp_Addr(Node* exp, Operand* addr_place) {
     /* Exp -> ID */
     if (first && is_node(first, "ID") && !second) {
         *addr_place = new_temp();
-        InterCode* ga = new_intercode(GET_ADDR);
-        ga->u.assign.left = *addr_place;
-        ga->u.assign.right = new_variable(first->idname);
-        return new_codelist(ga);
+        
+        Symbol s = lookup(first->idname);
+        /* 若该 ID 是数组或结构体，且作为参数传入，这本身就已经是个地址值 */
+        if (s && s->is_param && s->u.var_type && 
+           (s->u.var_type->kind == ARRAY || s->u.var_type->kind == STRUCTURE)) {
+            InterCode* asn = new_intercode(ASSIGN);
+            asn->u.assign.left = *addr_place;
+            asn->u.assign.right = new_variable(first->idname);
+            return new_codelist(asn);
+        } else {
+            /* 普通局部变量空间申请出的是内存块，此处需提取首地址 */
+            InterCode* ga = new_intercode(GET_ADDR);
+            ga->u.assign.left = *addr_place;
+            ga->u.assign.right = new_variable(first->idname);
+            return new_codelist(ga);
+        }
     }
 
     /* Exp -> Exp LB Exp RB (一维数组访问 / 高维数组按题意不考虑可适用此扩展) */
@@ -1004,6 +1022,13 @@ static CodeList* translate_ParamDec(Node* node) {
     Node* varDec = node->child ? node->child->next : NULL;
     const char* name = get_vardec_id(varDec);
     if (!name) return NULL;
+
+    /* 新增拦截：拒绝数组类型作为参数 */
+    Symbol s = lookup(name);
+    if (s && s->kind == SYM_VAR && s->u.var_type && s->u.var_type->kind == ARRAY) {
+        printf("Cannot translate: Code contains variables of multi-dimensional array type or parameters of array type.\n");
+        exit(0);
+    }
 
     InterCode* p = new_intercode(PARAM);
     p->u.one.op = new_variable(name);

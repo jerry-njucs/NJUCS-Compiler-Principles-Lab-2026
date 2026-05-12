@@ -115,12 +115,13 @@ static Symbol new_symbol(const char* name, SymbolKind kind, int lineno) {
     return s;
 }
 
-int insert_var(const char* name, Type type, int lineno) {
+int insert_var(const char* name, Type type, int lineno, int is_param) {
     Symbol s = new_symbol(name, SYM_VAR, lineno);
     if (!s)
         return 0;
 
     s->u.var_type = type;
+    s->is_param = is_param;
     if (!insert_symbol(s)) {
         free(s->name);
         free(s);

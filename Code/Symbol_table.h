@@ -17,6 +17,7 @@ struct Symbol_ {
     char* name;
     SymbolKind kind;
     int lineno;
+    int is_param;
 
     union {
         Type var_type;
@@ -37,7 +38,7 @@ void destroy_symbol_table();
 
 Symbol lookup(const char* name);
 
-int insert_var(const char* name, Type type, int lineno);
+int insert_var(const char* name, Type type, int lineno, int is_param);
 int insert_func(const char* name, Type ret_type, FieldList params, int lineno);
 int insert_struct(const char* name, Type type, int lineno);
 

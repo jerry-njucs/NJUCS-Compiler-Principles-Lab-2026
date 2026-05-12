@@ -146,7 +146,7 @@ static FieldList collect_varlist_params_ex(Node* varlist, int insert_vars) {
             FieldList one = make_field(id->idname, real_t);
             if (one) head = tail = one;
             if (insert_vars) {
-                if (!insert_var(id->idname, real_t, id->lineno)) {
+                if (!insert_var(id->idname, real_t, id->lineno, 1)) {
                     print_error(3, id->lineno, "Redefined variable", id->idname);
                 }
             }
@@ -280,7 +280,7 @@ static void handle_extdeclist(Node* extdeclist, Type t) {
         Node* id = get_vardec_id(vardec);
         Type real_t = build_type_from_vardec(vardec, t);
         if (id && is_node(id, "ID")) {
-            if (!insert_var(id->idname, real_t, id->lineno)) {
+            if (!insert_var(id->idname, real_t, id->lineno, 0)) {
                 print_error(3, id->lineno, "Redefined variable", id->idname);
             }
         }
@@ -306,7 +306,7 @@ static void handle_declist(Node* declist, Type t) {
             Node* id = get_vardec_id(vardec);
             Type real_t = build_type_from_vardec(vardec, t);
             if (id && is_node(id, "ID")) {
-                if (!insert_var(id->idname, real_t, id->lineno)) {
+                if (!insert_var(id->idname, real_t, id->lineno, 0)) {
                     print_error(3, id->lineno, "Redefined variable", id->idname);
                 }
             }
@@ -335,7 +335,7 @@ static void handle_varlist_params(Node* varlist) {
         Type real_t = build_type_from_vardec(vardec, base_t);
 
         if (id && is_node(id, "ID")) {
-            if (!insert_var(id->idname, real_t, id->lineno)) {
+            if (!insert_var(id->idname, real_t, id->lineno, 1)) {
                 print_error(3, id->lineno, "Redefined variable", id->idname);
             }
         }
