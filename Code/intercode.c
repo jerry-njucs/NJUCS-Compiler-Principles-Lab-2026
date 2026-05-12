@@ -107,13 +107,13 @@ static int get_type_size(Type type) {
     return 4;
 }
 
-// 极其简单直接：名字丢给符号表，拿到最终 Type 即可拿到精准总大小，无须手撕语法树乘法！
+// 通过查询符号表获取 VarDec 对应的变量名和类型大小
 static int get_vardec_size_and_id(Node* varDec, const char** id_out) {
-    *id_out = get_vardec_id(varDec); // 复用已有的查找底层ID名的函数
+    *id_out = get_vardec_id(varDec); 
     if (*id_out) {
         Symbol s = lookup(*id_out);
         if (s && s->kind == SYM_VAR) {
-            /* 新增拦截：拒绝多维数组 */
+            // 拒绝多维数组 
             if (s->u.var_type && s->u.var_type->kind == ARRAY && 
                 s->u.var_type->content.array.elem->kind == ARRAY) {
                 printf("Cannot translate: Code contains variables of multi-dimensional array type or parameters of array type.\n");
@@ -249,7 +249,6 @@ void print_operand(FILE* out, Operand op) {
         case OP_LABEL:     fprintf(out, "label%d", op.u.label_id); break;
         case OP_CONSTANT:  fprintf(out, "#%d", op.u.val); break;
         case OP_ADDRESS:
-            /* 地址值输出为 &x 或 &t */
             fprintf(out, "&");
             /* 复用已有字段打印主体 */
             if (op.u.name) fprintf(out, "%s", op.u.name);
@@ -537,7 +536,6 @@ static CodeList* translate_Exp(Node* node, Operand* place) {
         Operand label1 = new_label();
         Operand label2 = new_label();
 
-        /* code0: place := #0 */
         InterCode* asn0 = new_intercode(ASSIGN);
         asn0->u.assign.left = *place;
         asn0->u.assign.right = new_constant(0);
@@ -830,7 +828,7 @@ static CodeList* translate_Args(Node* node, ArgList** arg_list) {
     Operand t1 = new_temp();
     CodeList* code1 = NULL;
 
-    /* 检查是否为结构体或数组，若属于则传地址 */
+    // 检查是否为结构体或数组，若属于则传地址
     if (check_is_struct_or_array(exp)) {
         code1 = translate_Exp_Addr(exp, &t1);
     } else {
@@ -856,7 +854,7 @@ static CodeList* translate_Dec(Node* node) {
     int size = get_vardec_size_and_id(vardec, &var_name);
     
     CodeList* code_dec = NULL;
-    /* 如果 size 大于 4，说明是数组，申请空间 */
+    // 如果 size 大于 4，说明是数组，申请空间 
     if (size > 4 && var_name) {
         InterCode* dec = new_intercode(DEC);
         dec->u.dec.x = new_variable(var_name);
@@ -888,7 +886,6 @@ static CodeList* translate_Exp_Addr(Node* exp, Operand* addr_place) {
         *addr_place = new_temp();
         
         Symbol s = lookup(first->idname);
-        /* 若该 ID 是数组或结构体，且作为参数传入，这本身就已经是个地址值 */
         if (s && s->is_param && s->u.var_type && 
            (s->u.var_type->kind == ARRAY || s->u.var_type->kind == STRUCTURE)) {
             InterCode* asn = new_intercode(ASSIGN);
@@ -896,7 +893,6 @@ static CodeList* translate_Exp_Addr(Node* exp, Operand* addr_place) {
             asn->u.assign.right = new_variable(first->idname);
             return new_codelist(asn);
         } else {
-            /* 普通局部变量空间申请出的是内存块，此处需提取首地址 */
             InterCode* ga = new_intercode(GET_ADDR);
             ga->u.assign.left = *addr_place;
             ga->u.assign.right = new_variable(first->idname);
@@ -904,7 +900,7 @@ static CodeList* translate_Exp_Addr(Node* exp, Operand* addr_place) {
         }
     }
 
-    /* Exp -> Exp LB Exp RB (一维数组访问 / 高维数组按题意不考虑可适用此扩展) */
+    /* Exp -> Exp LB Exp RB (一维数组访问) */
     if (first && is_node(first, "Exp") && second && is_node(second, "LB")) {
         Node* index_exp = second->next;
         
@@ -1023,7 +1019,7 @@ static CodeList* translate_ParamDec(Node* node) {
     const char* name = get_vardec_id(varDec);
     if (!name) return NULL;
 
-    /* 新增拦截：拒绝数组类型作为参数 */
+    /* 拦截：拒绝数组类型作为参数 */
     Symbol s = lookup(name);
     if (s && s->kind == SYM_VAR && s->u.var_type && s->u.var_type->kind == ARRAY) {
         printf("Cannot translate: Code contains variables of multi-dimensional array type or parameters of array type.\n");
@@ -1082,7 +1078,7 @@ static CodeList* translate_ExtDef(Node* node) {
         CodeList* code2 = translate_CompSt(compst);
         return join_codelist(code1, code2);
     }
-    return NULL;  // 其他情况暂不处理
+    return NULL; 
 }
 
 static CodeList* translate_ExtDefList(Node* node) {
