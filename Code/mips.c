@@ -89,6 +89,9 @@ static void get_operand_name(Operand op, char* buf) {
 /* ===== 3. 核心分配逻辑 (Allocate, Ensure, Free) ===== */
 
 static int spill_ptr = 0; // 用于轮转替换（Round-Robin）的指针
+static int param_cnt = 0;   // 记录进入子函数后遇到了几个 PARAM
+static Operand arg_list[32]; // 暂存调用另一函数前的所有 ARG 
+static int arg_cnt = 0;      // 暂存数量
 
 /* 寻找一个空闲寄存器。如果不空，就挑一个写回内存(Spill)来腾出位置 */
 static int get_free_reg_idx(FILE* out_file) {
@@ -328,15 +331,17 @@ void generate_target_code(CodeList* intercodes, FILE* out_file) {
                 print_operand_label(out_file, code->u.one.op);
                 fprintf(out_file, ":\n");
                 
-                /* [新增栈帧] 扫描当前函数，计算完整 frame_size */
+                /* [新增] 重置形参计数器 */
+                param_cnt = 0;
+
                 clear_var_map();
                 pre_scan_function(curr);
                 
-                /* MIPS ABI Prologue */
-                fprintf(out_file, "  addi $sp, $sp, -8\n"); // 保护老的 $fp 和 $ra
+                /* MIPS ABI Prologue (已有) */
+                fprintf(out_file, "  addi $sp, $sp, -8\n"); 
                 fprintf(out_file, "  sw $ra, 4($sp)\n");
                 fprintf(out_file, "  sw $fp, 0($sp)\n");
-                fprintf(out_file, "  move $fp, $sp\n");    // 设置新的帧底
+                fprintf(out_file, "  move $fp, $sp\n");    
                 if (frame_size > 0) {
                     fprintf(out_file, "  addi $sp, $sp, -%d\n", frame_size); // 腾出局部变量空间
                 }
@@ -458,14 +463,37 @@ void generate_target_code(CodeList* intercodes, FILE* out_file) {
             }
 
             case CALL: {
-                spill_all(out_file); // Caller-saved，调用前全存安全！
+                spill_all(out_file); // 【极度重要】将CALL作为基本块边界，所有寄存器落盘，从而自动完美遵守 Caller-saved 约定！
+
+                // 根据标准C--生成规则，ARG是逆序存入数组的。所以 arg_list[arg_cnt - 1] 才是第 1 个参数
+                for (int i = 0; i < arg_cnt; i++) {
+                    // 正序第 i 个参数，在 arg_list 里的倒数下标：
+                    Operand arg_op = arg_list[arg_cnt - 1 - i]; 
+                    const char* rx = Ensure(arg_op, out_file); // 这里会读常数或生成lw，加载进物理寄存器
+                    
+                    if (i < 4) {
+                        fprintf(out_file, "  move $a%d, %s\n", i, rx);
+                    } else {
+                        // 超过 4 个参数，往下压栈
+                        fprintf(out_file, "  addi $sp, $sp, -4\n");
+                        fprintf(out_file, "  sw %s, 0($sp)\n", rx);
+                    }
+                }
+
                 fprintf(out_file, "  jal ");
                 print_operand_label(out_file, code->u.call.func);
                 fprintf(out_file, "\n");
                 
-                // 返回后再获得 v0
+                // 返回后立刻恢复栈由于超长传参而产生的偏移
+                if (arg_cnt > 4) {
+                    fprintf(out_file, "  addi $sp, $sp, %d\n", (arg_cnt - 4) * 4);
+                }
+                
+                // 返回值 v0 移交给真正要求的接收左值
                 const char* rz = Allocate(code->u.call.ret, out_file);
                 fprintf(out_file, "  move %s, $v0\n", rz);
+                
+                arg_cnt = 0; // 【调用完成，清空 ARG 收集缓冲区】
                 break;
             }
 
@@ -490,10 +518,29 @@ void generate_target_code(CodeList* intercodes, FILE* out_file) {
                 fprintf(out_file, "  # [DEC] \n");
                 break;
 
-            case PARAM:
-            case ARG:
-                fprintf(out_file, "  # TODO: 栈空间/参数 操作\n");
+            case PARAM: {
+                // 找到该变量在我们刚开辟的栈帧里的固有 offset
+                char name[32];
+                get_operand_name(code->u.one.op, name);
+                int offset = get_var_offset(name);
+
+                if (param_cnt < 4) {
+                    // 前 4 个参数坐在 $a0 ~ $a3 里，直接安置
+                    fprintf(out_file, "  sw $a%d, %d($fp) # [PARAM] 接收寄存器参数\n", param_cnt, offset);
+                } else {
+                    // 第 5 个及以后，坐在调用者的栈里。基于当前 $fp 向上找
+                    int caller_offset = 8 + (param_cnt - 4) * 4;
+                    fprintf(out_file, "  lw $v1, %d($fp) # [PARAM] 接收栈参数\n", caller_offset);
+                    fprintf(out_file, "  sw $v1, %d($fp)\n", offset);
+                }
+                param_cnt++;
                 break;
+            }
+            case ARG: {
+                // 暂时不发射汇编，把实参塞进缓冲队列
+                arg_list[arg_cnt++] = code->u.one.op;
+                break;
+            }
 
             default:
                 break;
