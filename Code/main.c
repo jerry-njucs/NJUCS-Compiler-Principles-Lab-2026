@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include "Node.h"
+#include "intercode.h"
+#include "mips.h"
 
 void semantic_check(struct Node* node);
-void generate_intercode(struct Node* node, FILE* out_file);
 
 extern FILE *yyin;
 extern void yyrestart(FILE *input_file);
@@ -38,7 +39,8 @@ int main(int argc, char *argv[]) {
     if (lexicalError == 0 && syntaxError == 0) {
         //printTree(root, 0);
         semantic_check(root);
-        generate_intercode(root, out);
+        CodeList* intercodes = generate_intercode(root);
+        generate_target_code(intercodes, out);
     }
 
     fclose(out);

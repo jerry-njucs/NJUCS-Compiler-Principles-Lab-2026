@@ -1099,8 +1099,9 @@ static CodeList* translate_Program(Node* node) {
 }
 
 // 中间代码生成入口
-void generate_intercode(Node* root, FILE* out_file) {
-    if (!root || !out_file) return;
+CodeList* generate_intercode(Node* root) {
+    if (!root) return NULL;
     CodeList* codes = translate_Program(root);
-    print_codelist(out_file, codes);
+    //print_codelist(out_file, codes);
+    return codes;
 }

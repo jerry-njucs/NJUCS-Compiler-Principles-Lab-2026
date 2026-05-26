@@ -2,6 +2,7 @@
 #define INTERCODE_H
 
 #include <stdio.h>
+#include "Node.h"
 
 /* 操作数类型：
  * OP_ADDRESS 表示“地址值”（用于 x := &y、x := *y、*x := y、ARG 传引用等）
@@ -83,4 +84,5 @@ void print_operand(FILE* out, Operand op);
 void print_intercode(FILE* out, InterCode* code);
 void print_codelist(FILE* out, CodeList* list);
 
+CodeList* generate_intercode(Node* root);
 #endif
