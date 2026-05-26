@@ -219,7 +219,14 @@ static void print_operand_label(FILE* out, Operand op) {
     if (op.kind == OP_LABEL) {
         fprintf(out, "label%d", op.u.label_id);
     } else if (op.kind == OP_FUNCTION) {
-        fprintf(out, "%s", op.u.name);
+        // 【新增安全过滤】：防止函数名与 MIPS 保留指令（如 add, sub）冲突
+        if (strcmp(op.u.name, "main") == 0 || 
+            strcmp(op.u.name, "read") == 0 || 
+            strcmp(op.u.name, "write") == 0) {
+            fprintf(out, "%s", op.u.name); // 这三个基础函数原样输出
+        } else {
+            fprintf(out, "func_%s", op.u.name); // 用户函数统一加前缀 func_
+        }
     }
 }
 
