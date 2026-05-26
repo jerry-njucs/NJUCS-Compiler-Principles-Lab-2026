@@ -141,6 +141,27 @@ static const char* Allocate(Operand op, FILE* out_file) {
 /* 为“读取源头”准备寄存器 (等同于 Ensure)
  * 如果在寄存器里直接用，如果不在内存里，需要发出 lw 指令加载进寄存器 */
 static const char* Ensure(Operand op, FILE* out_file) {
+    /* 【新增分支：应对读取常量的需求】 */
+    if (op.kind == OP_CONSTANT) {
+        char const_name[32];
+        sprintf(const_name, "c_%d", op.u.val); // 取一个防重复的假名字
+        
+        // 1. 命中缓存：该常数已经在某个寄存器中
+        for (int i = 0; i < REG_NUM; i++) {
+            if (!regs[i].free && strcmp(regs[i].var_name, const_name) == 0) {
+                return regs[i].name;
+            }
+        }
+        // 2. 未命中缓存：分配新寄存器并立即装载常数
+        int idx = get_free_reg_idx(out_file);
+        regs[idx].free = 0;
+        strcpy(regs[idx].var_name, const_name);
+        regs[idx].dirty = 0; // 常数当然不需要写回内存
+        fprintf(out_file, "  li %s, %d\n", regs[idx].name, op.u.val);
+        return regs[idx].name;
+    }
+
+    /* 原本针对普通变量的逻辑 */
     char name[32];
     get_operand_name(op, name);
 
