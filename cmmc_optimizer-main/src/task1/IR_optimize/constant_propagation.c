@@ -4,35 +4,39 @@
 
 #include <constant_propagation.h>
 
-
+// TODO
 static CPValue meetValue(CPValue v1, CPValue v2) {
-    /* TODO
-     * 计算不同数据流数据汇入后变量的CPValue的meet值
-     * 要考虑 UNDEF/CONST/NAC 的不同情况
-     */
-    TODO();
+    // NAC 吸收一切
+    if(v1.kind == NAC) return get_NAC();
+    if(v2.kind == NAC) return get_NAC();
+    // 有一个UNDEF
+    if(v1.kind == UNDEF) return v2;
+    if(v2.kind == UNDEF) return v1;
+    // 两者均为 CONST
+    if(v1.const_val == v2.const_val) return v1;
+    // 不同常量 → NAC
+    return get_NAC();
 }
 
+// TODO
 static CPValue calculateValue(IR_OP_TYPE IR_op_type, CPValue v1, CPValue v2) {
-    /* TODO
-     * 计算二元运算结果的CPValue值
-     * 要考虑 UNDEF/CONST/NAC 的不同情况
-     * if(v1.kind == CONST && v2.kind == CONST) {
-     *      int v1_const = v1.const_val, v2_const = v2.const_val;
-     *      int res_const;
-     *      switch (IR_op_type) {
-     *          case IR_OP_ADD: res_const = v1_const + v2_const; break;
-     *          case IR_OP_SUB: res_const = v1_const - v2_const; break;
-     *          case IR_OP_MUL: res_const = v1_const * v2_const; break;
-     *          case IR_OP_DIV:
-     *              if(v2_const == 0) return get_UNDEF();
-     *              res_const = v1_const / v2_const; break;
-     *          default: assert(0);
-     *      }
-     *      return get_CONST(res_const);
-     *  } ... 其他情况
-     */
-    TODO();
+    // 任一操作数未定义  结果也未定义
+    if(v1.kind == UNDEF || v2.kind == UNDEF) return get_UNDEF();
+    // 任一操作数非常量  结果也非常量
+    if(v1.kind == NAC || v2.kind == NAC) return get_NAC();
+    // 两者均为常量, 直接计算
+    int v1_const = v1.const_val, v2_const = v2.const_val;
+    int res_const;
+    switch (IR_op_type) {
+        case IR_OP_ADD: res_const = v1_const + v2_const; break;
+        case IR_OP_SUB: res_const = v1_const - v2_const; break;
+        case IR_OP_MUL: res_const = v1_const * v2_const; break;
+        case IR_OP_DIV:
+            if(v2_const == 0) return get_UNDEF(); // 除零: 未定义行为
+            res_const = v1_const / v2_const; break;
+        default: assert(0); // 不应到达
+    }
+    return get_CONST(res_const);
 }
 
 // UNDEF等价为在Map中不存在该Var的映射项
@@ -76,21 +80,19 @@ static void ConstantPropagation_teardown(ConstantPropagation *t) {
     Map_IR_block_ptr_Map_ptr_IR_var_CPValue_teardown(&t->mapOutFact);
 }
 
+// TODO
 static bool
 ConstantPropagation_isForward (ConstantPropagation *t) {
-    // TODO: return isForward?;
-    TODO();
+    return true; // 常量传播是前向分析
 }
 
+// TODO
 static Map_IR_var_CPValue*
 ConstantPropagation_newBoundaryFact (ConstantPropagation *t, IR_function *func) {
     Map_IR_var_CPValue *fact = NEW(Map_IR_var_CPValue);
-    /* TODO
-     * 在Boundary(Entry/Exit?)中, 函数参数初始化为?
-     * for_vec(IR_var, param_ptr, func->params)
-     *     VCALL(*fact, insert, *param_ptr, get_UNDEF/CONST/NAC?());
-     */
-    TODO();
+    // 前向分析: Boundary = OUT[Entry]
+    for_vec(IR_var, param_ptr, func->params)
+        VCALL(*fact, insert, *param_ptr, get_NAC());
     return fact;
 }
 
@@ -133,6 +135,7 @@ ConstantPropagation_meetInto (ConstantPropagation *t,
     return updated;
 }
 
+// TODO
 void ConstantPropagation_transferStmt (ConstantPropagation *t,
                                        IR_stmt *stmt,
                                        Map_IR_var_CPValue *fact) {
@@ -140,27 +143,22 @@ void ConstantPropagation_transferStmt (ConstantPropagation *t,
         IR_assign_stmt *assign_stmt = (IR_assign_stmt*)stmt;
         IR_var def = assign_stmt->rd;
         CPValue use_val = Fact_get_value_from_IR_val(fact, assign_stmt->rs);
-        /* TODO: solve IR_ASSIGN_STMT
-         * Fact_update_value/Fact_meet_value?(...);
-         */
-        TODO();
+        // x := y  →  fact[x] = fact[y], 直接用 update 覆盖 (块内只有一条路径)
+        Fact_update_value(fact, def, use_val);
     } else if(stmt->stmt_type == IR_OP_STMT) {
         IR_op_stmt *op_stmt = (IR_op_stmt*)stmt;
         IR_OP_TYPE IR_op_type = op_stmt->op;
         IR_var def = op_stmt->rd;
         CPValue rs1_val = Fact_get_value_from_IR_val(fact, op_stmt->rs1);
         CPValue rs2_val = Fact_get_value_from_IR_val(fact, op_stmt->rs2);
-        /* TODO: solve IR_OP_STMT
-         * Fact_update_value/Fact_meet_value?(...,calculateValue(...));
-         */
-        TODO();
+        // x := y op z  →  fact[x] = calculateValue(op, fact[y], fact[z])
+        CPValue res = calculateValue(IR_op_type, rs1_val, rs2_val);
+        Fact_update_value(fact, def, res);
     } else { // Other Stmt with new_def
         IR_var def = VCALL(*stmt, get_def);
         if(def != IR_VAR_NONE) {
-            /* TODO: solve stmt with new_def
-             * Fact_update_value/Fact_meet_value?(...);
-             */
-            TODO();
+            // LOAD/CALL/READ 等: 新值无法在编译期确定, 设为 NAC
+            Fact_update_value(fact, def, get_NAC());
         }
     }
 }

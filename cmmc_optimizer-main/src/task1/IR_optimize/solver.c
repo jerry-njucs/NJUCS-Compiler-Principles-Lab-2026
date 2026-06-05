@@ -69,7 +69,7 @@ static void worklistDoSolveForward(DataflowAnalysis *t, IR_function *func) {
 }
 
 //// ============================ Backward ===========================
-
+// 3 TODOs
 static void initializeBackward(DataflowAnalysis *t, IR_function *func) {
     for_list(IR_block_ptr, i, func->blocks) {
         // 所有块的 OUT fact 初始化为 bottom / empty
@@ -80,7 +80,6 @@ static void initializeBackward(DataflowAnalysis *t, IR_function *func) {
             void *exit_in_fact = VCALL(*t, newBoundaryFact, func);
             VCALL(*t, setInFact, i->val, exit_in_fact);
         } else {
-            // 其余块的 IN fact 初始化为 bottom / empty
             void *new_in_fact = VCALL(*t, newInitialFact);
             VCALL(*t, setInFact, i->val, new_in_fact);
         }
@@ -96,7 +95,6 @@ static void iterativeDoSolveBackward(DataflowAnalysis *t, IR_function *func) {
             // 获取 IN[blk] 与 OUT[blk]
             Fact *in_fact = VCALL(*t, getInFact, blk), *out_fact = VCALL(*t, getOutFact, blk);
             // OUT[blk] = meetAll(IN[succ] for succ in AllSucc[blk])
-            // 后向分析: 当前块的 OUT 由其所有后继的 IN 汇合得到
             for_list(IR_block_ptr, j, *VCALL(func->blk_succ, get, blk)) {
                 IR_block *succ = j->val;
                 Fact *succ_in_fact = VCALL(*t, getInFact, succ);
@@ -117,10 +115,8 @@ static void worklistDoSolveBackward(DataflowAnalysis *t, IR_function *func) {
     for_list(IR_block_ptr, i, func->blocks)
         VCALL(worklist, push_back, i->val);
     while(worklist.tail != NULL) {
-        // 从 worklist 头部取出一个块
         IR_block *blk = worklist.head->val;
         VCALL(worklist, pop_front);
-        // 获取 IN[blk] 与 OUT[blk]
         Fact *in_fact = VCALL(*t, getInFact, blk), *out_fact = VCALL(*t, getOutFact, blk);
         // OUT[blk] = meetAll(IN[succ] for succ in AllSucc[blk])
         for_list(IR_block_ptr, i, *VCALL(func->blk_succ, get, blk)) {
@@ -129,7 +125,6 @@ static void worklistDoSolveBackward(DataflowAnalysis *t, IR_function *func) {
             VCALL(*t, meetInto, succ_in_fact, out_fact);
         }
         // 若 IN[blk] 发生变化，则将其**前驱**全部加入 worklist
-        // 原因: 前驱的 OUT 依赖于当前块的 IN
         if(VCALL(*t, transferBlock, blk, in_fact, out_fact))
             for_list(IR_block_ptr, i, *VCALL(func->blk_pred, get, blk))
                 VCALL(worklist, push_back, i->val);

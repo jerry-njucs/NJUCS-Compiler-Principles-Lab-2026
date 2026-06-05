@@ -54,21 +54,16 @@ AvailableExpressionsAnalysis_isForward (AvailableExpressionsAnalysis *t) {
 
 static Fact_set_var*
 AvailableExpressionsAnalysis_newBoundaryFact (AvailableExpressionsAnalysis *t, IR_function *func) {
-    /* TODO:
-     * OutFact[Entry] = (Bottom: empty set) / (Top: universal set) / other?
-     * return NEW(Fact_set_var, is_top?);
-     */
-    TODO();
+    // 前向 Must 分析: Boundary = OUT[Entry]
+    // 函数入口处没有任何表达式已被计算 → BOTTOM (空集, is_top = false)
+    return NEW(Fact_set_var, false);
 }
 
 static Fact_set_var*
 AvailableExpressionsAnalysis_newInitialFact (AvailableExpressionsAnalysis *t) {
-    /* TODO:
-     * Must/May Analysis ?
-     * InitFact = (Bottom: empty set) / (Top: universal set) / other?
-     * return NEW(Fact_set_var, is_top?);
-     */
-    TODO();
+    // Must 分析: 初始假设所有表达式都可用 → TOP (is_top = true)
+    // 求解过程中通过 intersect 逐步收窄到真正可用的表达式
+    return NEW(Fact_set_var, true);
 }
 
 static void
@@ -107,12 +102,9 @@ AvailableExpressionsAnalysis_meetInto (AvailableExpressionsAnalysis *t,
         VCALL(target->set, union_with, &fact->set);
         return true;
     }
-    /* TODO:
-     * Must/May Analysis ?
-     * IN[blk] = union_with / intersect_with (all OUT[pred_blk]) ?
-     * return VCALL(target->set, union_with / intersect_with, &fact->set);
-     */
-    TODO();
+    // Must 分析: meet = intersection
+    // 只有在所有前驱路径上都可用的表达式才保留在 IN 中
+    return VCALL(target->set, intersect_with, &fact->set);
 }
 
 void AvailableExpressionsAnalysis_transferStmt (AvailableExpressionsAnalysis *t,
