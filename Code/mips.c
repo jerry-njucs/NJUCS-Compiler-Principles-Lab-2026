@@ -2,19 +2,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ===== 1. 寄存器状态池 (Register Pool) ===== */
+/* 寄存器状态池 */
 #define REG_NUM 18 
 
 typedef struct {
-    const char* name;   // 物理寄存器名称，如 "$t0"
+    const char* name;   // 物理寄存器名称
     int free;           // 1 表示空闲， 0 表示被占用
-    char var_name[32];  // 当前存放的变量名（若被占用）
-    int dirty;          // 1 表示脏数据（值被修改过，溢出时必须sw），0表示干净
+    char var_name[32];  // 当前存放的变量名
+    int dirty;          // 1 表示脏数据，0表示干净
 } RegDesc;
 
 static RegDesc regs[REG_NUM];
 
-/* 初始化所有可用于局部寄存器分配的 MIPS 寄存器 */
 static void init_regs() {
     const char* reg_names[REG_NUM] = {
         "$t0", "$t1", "$t2", "$t3", "$t4", "$t5", "$t6", "$t7", "$t8", "$t9",
@@ -28,18 +27,16 @@ static void init_regs() {
     }
 }
 
-/* ===== 2. 变量栈映射表 (Variable Stack Mapping) ===== */
-/* 用于记录局部变量/临时变量 -> 内存(相对 $fp 的偏移) 的映射关系 */
+/* 变量栈映射表 */
 typedef struct VarDesc_ {
-    char var_name[32];     // 变量名，如 "v1", "t2"
-    int offset;            // 相对于 $fp 的偏移，例如 -4, -8
+    char var_name[32];     // 变量名
+    int offset;            // 相对于 $fp 的偏移
     struct VarDesc_* next; 
 } VarDesc;
 
 static VarDesc* var_map = NULL;
 static int frame_size = 0; // 当前函数的栈帧大小
 
-/* 清空变量映射表 (在进入新函数时调用) */
 static void clear_var_map() {
     VarDesc* curr = var_map;
     while (curr) {
@@ -78,7 +75,7 @@ static int get_var_offset(const char* name) {
 /* 辅助函数：将 Operand 转换为唯一的字符串标识，方便存入表和池 */
 static void get_operand_name(Operand op, char* buf) {
     if (op.kind == OP_VARIABLE) {
-        sprintf(buf, "%s", op.u.name); // 此前 IR 中变量名应已保存在 name (如 "v1")
+        sprintf(buf, "%s", op.u.name); // 此前 IR 中变量名应已保存在 name 
     } else if (op.kind == OP_TEMP) {
         sprintf(buf, "t%d", op.u.var_id);
     } else {
@@ -86,7 +83,7 @@ static void get_operand_name(Operand op, char* buf) {
     }
 }
 
-/* ===== 3. 核心分配逻辑 (Allocate, Ensure, Free) ===== */
+/* 核心分配逻辑 */
 
 static int spill_ptr = 0; // 用于轮转替换（Round-Robin）的指针
 static int param_cnt = 0;   // 记录进入子函数后遇到了几个 PARAM
@@ -95,16 +92,15 @@ static int arg_cnt = 0;      // 暂存数量
 
 /* 寻找一个空闲寄存器。如果不空，就挑一个写回内存(Spill)来腾出位置 */
 static int get_free_reg_idx(FILE* out_file) {
-    // 1. 先尝试找完全空闲的寄存器
     for (int i = 0; i < REG_NUM; i++) {
         if (regs[i].free) return i;
     }
 
-    // 2. 如果全满，采用轮转贪心法挑一个牺牲者
+    // 采用轮转贪心法挑一个牺牲者
     int idx = spill_ptr;
     spill_ptr = (spill_ptr + 1) % REG_NUM;
 
-    // 3. 执行溢出 (Spilling)：只有脏数据（被修改过）才需要写回栈
+    // 执行溢出 (Spilling)
     if (regs[idx].dirty) {
         int offset = get_var_offset(regs[idx].var_name);
         // 生成 sw 指令将该寄存器数据写回到栈里对应的老家
@@ -112,7 +108,6 @@ static int get_free_reg_idx(FILE* out_file) {
                 regs[idx].name, offset, regs[idx].var_name);
     }
     
-    // 清理该寄存器状态，返回
     regs[idx].free = 1;
     return idx;
 }
@@ -123,18 +118,16 @@ static const char* Allocate(Operand op, FILE* out_file) {
     char name[32];
     get_operand_name(op, name);
 
-    // 1. 如果变量本来就在某个寄存器里，直接复用
+    // 直接复用
     for (int i = 0; i < REG_NUM; i++) {
         if (!regs[i].free && strcmp(regs[i].var_name, name) == 0) {
             regs[i].dirty = 1; // 马上要写入，标记为脏
             return regs[i].name;
         }
     }
-
-    // 2. 如果不在，要一个位置
     int idx = get_free_reg_idx(out_file);
     
-    // 3. 登记注册
+    // 登记注册
     regs[idx].free = 0;
     strcpy(regs[idx].var_name, name);
     regs[idx].dirty = 1; // 作为左值，马上会被赋值，直接标为脏
@@ -144,18 +137,17 @@ static const char* Allocate(Operand op, FILE* out_file) {
 /* 为“读取源头”准备寄存器 (等同于 Ensure)
  * 如果在寄存器里直接用，如果不在内存里，需要发出 lw 指令加载进寄存器 */
 static const char* Ensure(Operand op, FILE* out_file) {
-    /* 【新增分支：应对读取常量的需求】 */
     if (op.kind == OP_CONSTANT) {
         char const_name[32];
         sprintf(const_name, "c_%d", op.u.val); // 取一个防重复的假名字
         
-        // 1. 命中缓存：该常数已经在某个寄存器中
+        // 命中缓存
         for (int i = 0; i < REG_NUM; i++) {
             if (!regs[i].free && strcmp(regs[i].var_name, const_name) == 0) {
                 return regs[i].name;
             }
         }
-        // 2. 未命中缓存：分配新寄存器并立即装载常数
+        // 未命中缓存
         int idx = get_free_reg_idx(out_file);
         regs[idx].free = 0;
         strcpy(regs[idx].var_name, const_name);
@@ -164,31 +156,29 @@ static const char* Ensure(Operand op, FILE* out_file) {
         return regs[idx].name;
     }
 
-    /* 原本针对普通变量的逻辑 */
     char name[32];
     get_operand_name(op, name);
 
-    // 1. 命中缓存：直接在可用寄存器中找到
+    // 命中缓存
     for (int i = 0; i < REG_NUM; i++) {
         if (!regs[i].free && strcmp(regs[i].var_name, name) == 0) {
             return regs[i].name;
         }
     }
 
-    // 2. 缓存未命中（Miss）：需要腾一个位置
+    // 缓存未命中
     int idx = get_free_reg_idx(out_file);
     regs[idx].free = 0;
     strcpy(regs[idx].var_name, name);
-    regs[idx].dirty = 0; // 仅仅是读出，跟内存中的一致，不算脏数据
+    regs[idx].dirty = 0; 
 
-    // 3. 发射指令：将其从栈存根中重新读取 (Reload)
+    // 发射指令：将其从栈存根中重新读取
     int offset = get_var_offset(name);
     fprintf(out_file, "  lw %s, %d($fp) # [Reload] 装载 %s\n", regs[idx].name, offset, name);
 
     return regs[idx].name;
 }
 
-/* 手动释放一个寄存器 (供将来做激进的数据流分析，回收死代码空间) */
 static void Free(Operand op) {
     char name[32];
     get_operand_name(op, name);
@@ -209,7 +199,7 @@ static void spill_all(FILE* out_file) {
                 fprintf(out_file, "  sw %s, %d($fp) # [Block End] 洗盘 %s\n", 
                         regs[i].name, offset, regs[i].var_name);
             }
-            regs[i].free = 1; // 全部清空，下个基本块大家重新来
+            regs[i].free = 1; // 全部清空
         }
     }
 }
@@ -240,7 +230,7 @@ static const char* get_branch_inst(const char* relop) {
     return "beq"; // fallback
 }
 
-/* ===== 4. 栈帧预扫描模块 ===== */
+/* 栈帧预扫描模块 */
 
 /* 辅助检查：如果操作数是变量且未分配偏址，则分配 4 字节 */
 static void check_alloc(Operand op) {
@@ -282,7 +272,6 @@ static void pre_scan_function(CodeList* func_curr) {
                 break;
             case DEC: {
                 char name[32];
-                // 【修复】：将 c->u.dec.op 改为 c->u.dec.x
                 get_operand_name(c->u.dec.x, name);
                 if (get_var_offset(name) == 0) {
                     allocate_var_offset(name, c->u.dec.size); // 根据要求分配大数组块
@@ -295,7 +284,7 @@ static void pre_scan_function(CodeList* func_curr) {
     }
 }
 
-/* ===== 5. 目标代码生成接口 ===== */
+/* 目标代码生成接口 */
 
 void generate_target_code(CodeList* intercodes, FILE* out_file) {
     if (!intercodes || !out_file) return;
@@ -362,8 +351,6 @@ void generate_target_code(CodeList* intercodes, FILE* out_file) {
                     const char* rx = Ensure(code->u.assign.right, out_file);
                     const char* rz = Allocate(code->u.assign.left, out_file);
                     fprintf(out_file, "  move %s, %s\n", rz, rx);
-                    /* 注：若将来加入数据流分析，可在此处加上：
-                       if (code->u.assign.right 后续死亡) Free(code->u.assign.right); */
                 }
                 break;
 
@@ -470,7 +457,7 @@ void generate_target_code(CodeList* intercodes, FILE* out_file) {
             }
 
             case CALL: {
-                spill_all(out_file); // 【极度重要】将CALL作为基本块边界，所有寄存器落盘，从而自动完美遵守 Caller-saved 约定！
+                spill_all(out_file); // 将CALL作为基本块边界，所有寄存器落盘
 
                 // 根据标准C--生成规则，ARG是逆序存入数组的。所以 arg_list[arg_cnt - 1] 才是第 1 个参数
                 for (int i = 0; i < arg_cnt; i++) {
@@ -500,7 +487,7 @@ void generate_target_code(CodeList* intercodes, FILE* out_file) {
                 const char* rz = Allocate(code->u.call.ret, out_file);
                 fprintf(out_file, "  move %s, $v0\n", rz);
                 
-                arg_cnt = 0; // 【调用完成，清空 ARG 收集缓冲区】
+                arg_cnt = 0; 
                 break;
             }
 
